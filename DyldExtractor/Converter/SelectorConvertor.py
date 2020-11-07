@@ -74,7 +74,8 @@ class SelectorConverter(object):
 				selector = self.dyldFile.readString(targetOff)
 
 				if not selector in self.selectorCache:
-					print("\tNo selref for: " + str(selector))
+					if selector != b'\x00':
+						print("\tNo selref for: " + str(selector))
 					continue
 
 				selrefAddr = self.selectorCache[selector]
