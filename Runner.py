@@ -106,7 +106,7 @@ def runOnce(imageIndex: int, path: str) -> None:
 		MachO.Writer(macho).writeToPath(path)
 
 
-def listImages(filterTerm: bytes = b""):
+def listImages(filterTerm: str):
 	"""
 	Prints all the images in the cache with an optional filter term.
 	"""	
@@ -123,8 +123,31 @@ def listImages(filterTerm: bytes = b""):
 				if data == b"\x00":
 					break
 
-			if filterTerm.lower() in path.lower():
-				print(str(path) + ": " + str(dyld.images.index(image)))
+			if filterTerm.lower() in path.lower().decode("utf-8"):
+				print(path.decode("utf-8") + ": " + str(dyld.images.index(image)))
+
+
+def extract(framework: str, out: str):
+	with open(DYLD_PATH, "rb") as dyldFile:
+		dyld = Dyld.DyldFile(dyldFile)
+
+		for image in dyld.images:
+			dyldFile.seek(image.pathFileOffset)
+			path = b""
+			while True:
+				data = dyldFile.read(1)
+				if data != b"\x00":
+					path += data
+				else:
+					break
+			#
+			if framework.lower() == str(os.path.basename(path.decode("utf-8"))).lower():
+				runOnce(dyld.images.index(image), out)
+			elif framework in path.decode("utf-8"):
+				pass
+			else:
+				pass
+				# print("hm")
 
 
 if __name__ == "__main__":
