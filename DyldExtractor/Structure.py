@@ -77,6 +77,12 @@ class Structure(object):
 		fields = cls._getFields()
 
 		inst = cls()
+		if offset <0:
+			print("Structure.parse() offset is negative")
+			print("The program will now crash; whatever called this needs to validate its offset.")
+			print("-----------")
+			# buffer.seek() is going to raise OSError
+			# maybe this should be abstracted to a custom internal error?
 		buffer.seek(offset)
 
 		for field in fields:
