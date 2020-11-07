@@ -121,7 +121,12 @@ class ObjCConverter(object):
 						struct.pack_into("<Q", section.sectionData, i, classObjPtr)
 
 						classObjOff = self.dyldFile.convertAddr(classObjPtr)
+						if classObjOff < 0:
+							# will crash the program
+							print(f'fail on {struct.unpack_from("<Q", section.sectionData, i)[0]}')
+							continue
 						classObj = ObjC.class_t.parse(self.dyldFile.file, classObjOff)
+
 
 						classObj.isa &= 0xffffffffff
 						classObj.superClass &= 0xffffffffff
@@ -147,7 +152,9 @@ class ObjCConverter(object):
 					for i in range(0, section.size, 8):
 						protoPtr = struct.unpack_from("<Q", section.sectionData, i)[0]
 						protoPtr &= 0xffffffffff
-
+						if protoPtr <= 0:
+							print(f'fail on {struct.unpack_from("<Q", section.sectionData, i)[0]}')
+							continue
 						protoSect, protoSectOff = self.processProtocolData(protoPtr)
 						self.ptrs.append(DynPtr(section, i, protoSect, protoSectOff))
 				
@@ -155,7 +162,9 @@ class ObjCConverter(object):
 					for i in range(0, section.size, 8):
 						catPtr = struct.unpack_from("<Q", section.sectionData, i)[0]
 						catPtr &= 0xffffffffff
-						
+						if catPtr <= 0:
+							print(f'fail on {struct.unpack_from("<Q", section.sectionData, i)[0]}')
+							continue
 						catSect, catSectOff = self.processCategory(catPtr)
 						self.ptrs.append(DynPtr(section, i, catSect, catSectOff))
 	
@@ -285,7 +294,9 @@ class ObjCConverter(object):
 				self.ptrs.append(DynPtr(methListSect, methtypeFieldOff, methtypeSect, methtypeOff))
 			
 			if meth.imp and not self.machoFile.containsAddr(meth.imp):
-				raise ObjCConverterUnknownError
+				pass
+				# print("Could not find method imp: " + str(meth.imp))
+				# raise ObjCConverterUnknownError
 		
 		return methListSect, methListSectOff
 	
