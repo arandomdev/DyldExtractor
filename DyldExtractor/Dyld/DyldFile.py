@@ -59,8 +59,12 @@ class DyldFile(object):
 				The null terminated C-String.
 		"""
 
-		self.file.seek(fileOff)
+		if fileOff < 0:
+			# maybe we should crash here and fix it elsewhere?
+			# maybe later, this works fine
+			return b''
 
+		self.file.seek(fileOff)
 		data = b""
 		while True:
 			char = self.file.read(1)

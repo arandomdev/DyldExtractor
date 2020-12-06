@@ -342,12 +342,25 @@ class StubConverter(object):
 		for i in range(STUB_HELPER_START, stubHelperSect.size, STUB_HELPER_SIZE):
 			lazyBindOff = struct.unpack_from("<I", stubHelperData, i + STUB_HELPER_DATA_OFF)[0]
 			bindData = self.readLazyBind(lazyBindOff)
-
-			laSymPtrAddr = self.machoFile.loadCommands[bindData[0]].vmaddr + bindData[1]
+			# print(f'check {self.machoFile.loadCommands[bindData[0]]}')
+			# if not isinstance(self.machoFile.loadCommands[bindData[0]], MachO.MachoStructs.segment_command_64 ):
+			#	continue
+			# print(self.machoFile.loadCommands[bindData[0]])
+			try:
+				laSymPtrAddr = self.machoFile.loadCommands[bindData[0]].vmaddr + bindData[1]
+			except:
+				continue
 			laSymPtrSectOff = laSymPtrAddr - laSymPtrSect.addr
-
 			stubHelperAddr = stubHelperSect.addr + i
-			struct.pack_into("<Q", laSymPtrData, laSymPtrSectOff, stubHelperAddr)
+
+			# print(f'try: <Q - {str(laSymPtrData)[:40]}, {laSymPtrSectOff}, {stubHelperAddr}')
+			# print(len(str(laSymPtrData)))
+			try:
+				struct.pack_into("<Q", laSymPtrData, laSymPtrSectOff, stubHelperAddr)
+			except:
+				#print(f'fail: <Q - {str(laSymPtrData)}, {laSymPtrSectOff}, {stubHelperAddr}')
+				# print('fail!\n'); exit()
+				continue
 
 			symToLaPtr[bindData[2]] = laSymPtrAddr
 
