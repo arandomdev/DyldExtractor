@@ -16,9 +16,57 @@ class OffsetConverter(object):
 		pass
 
 	def convert(self) -> None:
+		self.preprocessFile()
+
 		self.processLoadCommands()
 		self.processSymbolTable()
 		self.fixLinkEdit()
+		pass
+
+	def preprocessFile(self) -> None:
+		"""
+		verifies and fixes issues in certain situations,
+		most noticeably when there is not enough space for
+		the extra load commands.
+		"""
+
+		# check if there is enough space for the load commands
+		firstSeg = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_SEGMENT_64)
+		availableSpace = firstSeg.sections[0].addr - firstSeg.vmaddr
+		
+		sizeofcmds = self.machoFile.machHeader.sizeofcmds
+
+		if availableSpace < sizeofcmds:
+			print("Warning Not enough space for load commands.")
+			print("Attempting to make space by removing LC_UUID and LC_CODE_SIGNATURE.")
+
+			commandsToRemove = []
+			commandsToRemove.extend(self.machoFile.getLoadCommand(MachO.LoadCommands.LC_UUID, multiple=True))
+
+			extraSpace = sum(map(lambda cmd: cmd.cmdsize, commandsToRemove))
+			if availableSpace < (sizeofcmds - extraSpace):
+				# if there is still not enough space, remove all the LC_LOAD_DYLIB commands
+				# and notify the user
+
+				print("Still not enough space... removing all LC_LOAD_DYLIB")
+
+				dylibCmds = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_LOAD_DYLIB, multiple=True)
+				for dylib in dylibCmds:
+					print(f"removed: {dylib.dylibData}")
+
+				commandsToRemove.extend(dylibCmds)
+			
+			# try again
+			extraSpace = sum(map(lambda cmd: cmd.cmdsize, commandsToRemove))
+			if availableSpace < (sizeofcmds - extraSpace):
+				raise Exception("Unable to fit extra load commands into macho file!")
+			
+			# remove the target load commands and update the machHeader
+			for cmd in commandsToRemove:
+				self.machoFile.loadCommands.remove(cmd)
+			
+			self.machoFile.machHeader.ncmds -= len(commandsToRemove)
+			self.machoFile.machHeader.sizeofcmds -= extraSpace
 		pass
 
 	def processLoadCommands(self) -> None:
