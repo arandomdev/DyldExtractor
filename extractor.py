@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
 
-"""
-Useful links
-	https://opensource.apple.com/source/xnu/xnu-6153.81.5/EXTERNAL_HEADERS/mach-o/loader.h.auto.html
-	https://opensource.apple.com/source/objc4/objc4-781/runtime/objc-runtime-new.h.auto.html
-	
-	https://opensource.apple.com/source/dyld/dyld-733.6/launch-cache/dyld_cache_format.h.auto.html
-	https://opensource.apple.com/source/dyld/dyld-733.6/launch-cache/dsc_extractor.cpp.auto.html
-
-	https://github.com/deepinstinct/dsc_fix/blob/master/dsc_fix.py
-	https://github.com/kennytm/Miscellaneous/blob/master/dyld_decache.cpp
-	https://github.com/phoenix3200/decache/blob/master/decache.mm
-
-	https://worthdoingbadly.com/dscextract/
-	https://github.com/zhuowei/dsc_extractor_badly/blob/master/launch-cache/dsc_extractor.cpp
-
-	https://static.docs.arm.com/ddi0596/a/DDI_0596_ARM_a64_instruction_set_architecture.pdf
-"""
-
 import copy
 import os, sys
 import struct
