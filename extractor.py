@@ -1,157 +1,136 @@
 #!/usr/bin/env python3
 
-import copy
-import os, sys
-import struct
+import typing
+import argparse
+import pathlib
+import logging
+import os
 
 from DyldExtractor import Dyld
 from DyldExtractor import MachO
+from DyldExtractor import Converter
 
-from DyldExtractor.Converter.OffsetConverter import OffsetConverter
-from DyldExtractor.Converter.LinkeditConverter import LinkeditConverter, RebaseConverter
-from DyldExtractor.Converter.StubConverter import StubConverter
-from DyldExtractor.Converter.ObjCConvertor import ObjCConverter
-from DyldExtractor.Converter.SelectorConvertor import SelectorConverter
+def enumerateImages(dyld: Dyld.DyldFile) -> typing.List[typing.Tuple[int, str, str]]:
+	"""Enumerate the images in the Dyld Cache.
 
-# MacOS Location
-DYLD_PATH = "/private/var/db/dyld/dyld_shared_cache_x86_64h"
-
-
-def runAllImages():
-	"""
-	Test a module with all images in the cache	
+	Returned as a list of tuples containing the image index, name, and path.
 	"""
 
-	with open(DYLD_PATH, "rb") as dyldFile:
-		dyld = Dyld.DyldFile(dyldFile)
+	images = []
 
-		totalImages = len(dyld.images)
-		for i in range(1, totalImages):
-			image = dyld.images[i]
+	for i in range(0, len(dyld.images)):
+		image = dyld.images[i]
+		
+		imagePath = dyld.readString(image.pathFileOffset)
+		imagePath = imagePath[0:-1] # remove the null terminator
+		imagePath = imagePath.decode("utf-8")
 
-			imagePath = dyld.readString(image.pathFileOffset)
-			imageName = imagePath.split(b"/")[-1].decode("utf-8")
+		imageName = imagePath.split("/")[-1]
 
-			print("{}/{}: {}".format(i, totalImages, imageName))
-
-			imageOff = dyld.convertAddr(image.address)
-			macho = MachO.MachoFile.parse(dyldFile, imageOff)
-
-			# LinkeditConverter(macho, dyld).convert()
-			# RebaseConverter(macho, dyld).convert()
-			SelectorConverter(macho, dyld).convert()
-	# StubConverter(macho, dyld).convert()
-	# ObjCConverter(macho, dyld).convert()
-	# OffsetConverter(macho).convert()
-	# MachO.Writer(macho).writeToPath(TEMP_PATH)
+		images.append((i, imageName, imagePath))
+	
+	return images
 
 
-def runOnce(imageIndex: int, path: str) -> None:
-	"""
-	Decache an image at the imageIndex, and save it to the path.
-	"""
+def extractImage(dyld: Dyld.DyldFile, image: Dyld.dyld_cache_image_info, outputPath: str) -> None:
+	imageOff = dyld.convertAddr(image.address)
 
-	with open(DYLD_PATH, "rb") as dyldFile:
-		dyld = Dyld.DyldFile(dyldFile)
+	machoFile = MachO.MachoFile.parse(dyld.file, imageOff)
 
-		image = dyld.images[imageIndex]
+	# rebuild the linkedit segment, which includes symbols
+	logging.info("Starting LinkeditConverter")
+	Converter.LinkeditConverter(machoFile, dyld).convert()
 
-		imageOff = dyld.convertAddr(image.address)
-		macho = MachO.MachoFile.parse(dyldFile, imageOff)
+	# remove extra data in pointers and generate rebase data
+	logging.info("Starting RebaseConverter")
+	Converter.RebaseConverter(machoFile, dyld).convert()
 
-		# comment or uncomment lines below to enable or disable modules. Though some do rely on each other.
-		# rebuild the linkedit segment, which includes symbols
-		print("LinkeditConverter")
-		LinkeditConverter(macho, dyld).convert()
+	# fix references to selectors
+	logging.info("Starting SelectorConverter")
+	Converter.SelectorConverter(machoFile, dyld).convert()
 
-		# remove extra data in pointers and generate rebase data
-		print("RebaseConverter")
-		RebaseConverter(macho, dyld).convert()
+	# fix stubs and references to stubs
+	logging.info("Starting StubConverter")
+	Converter.StubConverter(machoFile, dyld).convert()
 
-		# fix references to selectors
-		print("SelectorConverter")
-		SelectorConverter(macho, dyld).convert()
+	# fix and decache ObjC info
+	logging.info("Starting ObjCConverter")
+	Converter.ObjCConverter(machoFile, dyld).convert()
 
-		# fix stubs and references to stubs
-		print("StubConverter")
-		StubConverter(macho, dyld).convert()
+	# changes file offsets so that the final MachO file is not GBs big
+	logging.info("Starting OffsetConverter")	
+	Converter.OffsetConverter(machoFile).convert()
 
-		# fix and decache ObjC info
-		print("ObjCConverter")
-		ObjCConverter(macho, dyld).convert()
-
-		# changes file offsets so that the final MachO file is not GBs big
-		print("OffsetConverter")
-		OffsetConverter(macho).convert()
-
-		# save the converted image to a file
-		print("Writer")
-		MachO.Writer(macho).writeToPath(path)
-
-
-def listImages(filterTerm: str):
-	"""
-	Prints all the images in the cache with an optional filter term.
-	"""
-
-	with open(DYLD_PATH, "rb") as dyldFile:
-		dyld = Dyld.DyldFile(dyldFile)
-
-		for image in dyld.images:
-			dyldFile.seek(image.pathFileOffset)
-			path = b""
-			while True:
-				data = dyldFile.read(1)
-				path += data
-				if data == b"\x00":
-					break
-
-			if filterTerm.lower() in path.lower().decode("utf-8"):
-				print(path.decode("utf-8") + ": " + str(dyld.images.index(image)))
-
-
-def extract(framework: str, out: str):
-	with open(DYLD_PATH, "rb") as dyldFile:
-		dyld = Dyld.DyldFile(dyldFile)
-
-		for image in dyld.images:
-			dyldFile.seek(image.pathFileOffset)
-			path = b""
-			while True:
-				data = dyldFile.read(1)
-				if data != b"\x00":
-					path += data
-				else:
-					break
-			#
-			if framework.lower() == str(os.path.basename(path.decode("utf-8"))).lower():
-				runOnce(dyld.images.index(image), out)
-			elif framework in path.decode("utf-8"):
-				pass
-			else:
-				pass
-				# print("hm")
+	# save the converted image to a file
+	logging.info("Starting Writer")
+	MachO.Writer(machoFile).writeToPath(outputPath)
+	pass
 
 
 if __name__ == "__main__":
-	# we should probably use argparse for this
-	# counterpoint: this is more readable and dependencies stink
-	try:
-		for i, arg in enumerate(sys.argv[1:]):
-			if "-c" == arg:
-				DYLD_PATH = sys.argv[i+2]
-			elif "-e" == arg:
-				FW = sys.argv[i+2]
-			elif "-o" == arg:
-				OUT = sys.argv[i+2]
-		# We catch the error if these aren't defined
-		# Lazy, maybe, but why not
-		extract(FW, OUT)
-	except (IndexError, NameError):
-		print("Usage - ./extractor.py [-c <dyld_shared_cache path>] -e <Framework Name> -o <Output File>")
-		exit(1)
-	except FileNotFoundError:
-		# this might cause problems
-		print(f'Couldn\'t find {DYLD_PATH}')
-		exit(1)
+	parser = argparse.ArgumentParser()
+	parser.add_argument("dyld_path", type=pathlib.Path, help="A path to the target DYLD cache.")
+	parser.add_argument("-f", "--framework", help="The name of the framework to extract.")
+	parser.add_argument("-o", "--output", help="Specify the output path for the extracted framework. By default it extracts to the binaries folder.")
+	
+	parser.add_argument("-l", "--list-frameworks", action="store_true", help="List all frameworks in the cache.")
+	parser.add_argument("--filter", help="Filter out frameworks when listing them.")
 
+	parser.add_argument("-v", "--verbosity", type=int, choices=[0, 1, 2, 3], default=1, help="Increase verbosity, Option 1 is the default. | 0 = None | 1 = Critical Error and Warnings | 2 = 1 + Info | 3 = 2 + debug |")
+
+	args = parser.parse_args()
+
+	# configure Logging
+	level = logging.WARNING # default options
+
+	if args.verbosity == 0:
+		# Set the log level so high that it doesn't do anything
+		level = 100
+	elif args.verbosity == 2:
+		level = logging.INFO
+	elif args.verbosity == 3:
+		level = logging.DEBUG
+	
+	logging.basicConfig(
+		format="%(asctime)s:%(msecs)03d %(filename)s [%(levelname)-8s] : %(message)s",
+		datefmt="%H:%M:%S",
+		level=level
+	)
+
+	with open(args.dyld_path, mode="rb") as dyldFileHandle:
+		dyldFile = Dyld.DyldFile(dyldFileHandle)
+		images = enumerateImages(dyldFile)
+
+		# List Images option
+		if args.list_frameworks:	
+			if args.filter:
+				filterTerm = args.filter.lower()
+				images = [x for x in images if filterTerm in x[2].lower()]
+
+			print("Listing images")
+			print(f"Index| Name                                    | Path")
+			for image in images:
+				print(f"{image[0]:4} | {image[1]:40} | {image[2]}")
+		
+		# Extract image Option
+		if args.framework:	
+			targetFramework = args.framework.strip()
+			targetImageData = None
+			for image in images:
+				if targetFramework in image[1]:
+					targetImageData = image
+					break
+
+			if not targetImageData:
+				print(f"Unable to find {args.framework} in cache")
+
+			print("Extracting " + targetImageData[1])
+			if args.output:
+				extractImage(dyldFile, dyldFile.images[targetImageData[0]], args.output)
+			else:
+				# create the binaries folder
+				os.makedirs("binaries", exist_ok=True)
+				extractImage(dyldFile, dyldFile.images[targetImageData[0]], "binaries\\"+targetImageData[1])
+		else:
+			print("Specify a framework to extract, see -h")
+	pass

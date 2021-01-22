@@ -1,3 +1,4 @@
+import logging
 import struct
 import typing
 
@@ -342,24 +343,18 @@ class StubConverter(object):
 		for i in range(STUB_HELPER_START, stubHelperSect.size, STUB_HELPER_SIZE):
 			lazyBindOff = struct.unpack_from("<I", stubHelperData, i + STUB_HELPER_DATA_OFF)[0]
 			bindData = self.readLazyBind(lazyBindOff)
-			# print(f'check {self.machoFile.loadCommands[bindData[0]]}')
-			# if not isinstance(self.machoFile.loadCommands[bindData[0]], MachO.MachoStructs.segment_command_64 ):
-			#	continue
-			# print(self.machoFile.loadCommands[bindData[0]])
+
 			try:
 				laSymPtrAddr = self.machoFile.loadCommands[bindData[0]].vmaddr + bindData[1]
 			except:
 				continue
+
 			laSymPtrSectOff = laSymPtrAddr - laSymPtrSect.addr
 			stubHelperAddr = stubHelperSect.addr + i
 
-			# print(f'try: <Q - {str(laSymPtrData)[:40]}, {laSymPtrSectOff}, {stubHelperAddr}')
-			# print(len(str(laSymPtrData)))
 			try:
 				struct.pack_into("<Q", laSymPtrData, laSymPtrSectOff, stubHelperAddr)
 			except:
-				#print(f'fail: <Q - {str(laSymPtrData)}, {laSymPtrSectOff}, {stubHelperAddr}')
-				# print('fail!\n'); exit()
 				continue
 
 			symToLaPtr[bindData[2]] = laSymPtrAddr
@@ -393,7 +388,7 @@ class StubConverter(object):
 			elif symbol in SPECIAL_STUB:
 				laSymPtrAddr = symToLaPtr[SPECIAL_STUB[symbol]]
 			else:
-				print("No lazy symbol pointer for symbol: " + str(symbol))
+				logging.warning("No lazy symbol pointer for symbol: " + str(symbol))
 				continue
 
 			# re link the optimized stub
@@ -443,7 +438,7 @@ class StubConverter(object):
 
 				targetSym = self.lookupSymbol(targetFunc)
 				if targetSym is None:
-					print("No symbol for: " + hex(targetFunc))
+					logging.warning("No symbol for: " + hex(targetFunc))
 					continue
 
 				stubAddr = None
@@ -452,7 +447,7 @@ class StubConverter(object):
 				elif targetSym in SPECIAL_STUB:
 					stubAddr = self.symbolToStubAddr[SPECIAL_STUB[targetSym]]
 				else:
-					print("No stub addr for: " + str(targetSym))
+					logging.warning("No stub addr for: " + str(targetSym))
 					continue
 
 				# point the branch instruction to the stub

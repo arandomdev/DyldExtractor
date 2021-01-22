@@ -1,4 +1,6 @@
+import logging
 import struct
+import typing
 
 from DyldExtractor import MachO, Dyld
 
@@ -29,7 +31,7 @@ class SelectorConverter(object):
 	def convert(self) -> None:
 		success = self.enumerateSelrefs()
 		if not success:
-			print("\t can't get selrefs sections")
+			logging.error("Can't get selrefs section")
 			return
 
 		textSect = self.machoFile.getSegment(b"__TEXT\x00", b"__text\x00")[1]
@@ -69,13 +71,13 @@ class SelectorConverter(object):
 			if not self.machoFile.containsAddr(target):
 				targetOff = self.dyldFile.convertAddr(target)
 				if targetOff == -1:
-					print("\tInvalid address: " + str(target))
+					logging.warning("Invalid address for target: " + str(target))
 					continue
 				selector = self.dyldFile.readString(targetOff)
 
 				if not selector in self.selectorCache:
 					if selector != b'\x00':
-						print("\tNo selref for: " + str(selector))
+						logging.warning("No selref for: " + str(selector))
 					continue
 
 				selrefAddr = self.selectorCache[selector]

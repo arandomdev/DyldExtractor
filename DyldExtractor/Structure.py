@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import struct
+import logging
 
 from io import BufferedReader
 from typing import Tuple, Union, ClassVar, List
@@ -77,10 +78,8 @@ class Structure(object):
 		fields = cls._getFields()
 
 		inst = cls()
-		if offset <0:
-			print("Structure.parse() offset is negative")
-			print("The program will now crash; whatever called this needs to validate its offset.")
-			print("-----------")
+		if offset < 0:
+			logging.critical("Structure.parse offset is negative")
 			# buffer.seek() is going to raise OSError
 			# maybe this should be abstracted to a custom internal error?
 		buffer.seek(offset)

@@ -1,3 +1,4 @@
+import logging
 import struct
 import copy
 
@@ -46,13 +47,13 @@ class ObjCConverter(object):
 		for seg in self.machoFile.getLoadCommand(MachO.LoadCommands.LC_SEGMENT_64, multiple=True):
 			# Skip libobjc.A.dylib
 			if b"__OBJC_RW\x00" in seg.segname:
-				print("\tSkip libobjc")
+				logging.warning("Skipping libobjc")
 				return
 			
 			# Skip Swift dylibs
 			for sect in seg.sections:
 				if b"swift" in sect.sectname:
-					print("\tSkip Swift")
+					logging.warning("Skipping swift frameworks")
 					return
 
 		self.processSegments()
@@ -123,10 +124,10 @@ class ObjCConverter(object):
 						classObjOff = self.dyldFile.convertAddr(classObjPtr)
 						if classObjOff < 0:
 							# will crash the program
-							print(f'fail on {struct.unpack_from("<Q", section.sectionData, i)[0]}')
+							logging.critical(f"fail on {struct.unpack_from('<Q', section.sectionData, i)[0]}")
 							continue
-						classObj = ObjC.class_t.parse(self.dyldFile.file, classObjOff)
 
+						classObj = ObjC.class_t.parse(self.dyldFile.file, classObjOff)
 
 						classObj.isa &= 0xffffffffff
 						classObj.superClass &= 0xffffffffff
@@ -153,8 +154,9 @@ class ObjCConverter(object):
 						protoPtr = struct.unpack_from("<Q", section.sectionData, i)[0]
 						protoPtr &= 0xffffffffff
 						if protoPtr <= 0:
-							print(f'fail on {struct.unpack_from("<Q", section.sectionData, i)[0]}')
+							logging.critical(f"fail on {struct.unpack_from('<Q', section.sectionData, i)[0]}")
 							continue
+
 						protoSect, protoSectOff = self.processProtocolData(protoPtr)
 						self.ptrs.append(DynPtr(section, i, protoSect, protoSectOff))
 				
@@ -163,8 +165,9 @@ class ObjCConverter(object):
 						catPtr = struct.unpack_from("<Q", section.sectionData, i)[0]
 						catPtr &= 0xffffffffff
 						if catPtr <= 0:
-							print(f'fail on {struct.unpack_from("<Q", section.sectionData, i)[0]}')
+							logging.critical(f"fail on {struct.unpack_from('<Q', section.sectionData, i)[0]}")
 							continue
+
 						catSect, catSectOff = self.processCategory(catPtr)
 						self.ptrs.append(DynPtr(section, i, catSect, catSectOff))
 	
@@ -208,19 +211,15 @@ class ObjCConverter(object):
 			self.ptrs.append(DynPtr(classDataSect, nameFieldOff, classNameSect, nameOff))
 		
 		if classData.baseMethods:
-			if not self.machoFile.containsAddr(classData.baseMethods):	print("basemethods") # TODO: remove
 			self.processMethodList(classData.baseMethods)
 		
 		if classData.baseProtocols:
-			if not self.machoFile.containsAddr(classData.baseProtocols):	print("baseProtocols") # TODO: remove
 			self.processProtocolList(classData.baseProtocols)
 
 		if classData.ivars:
-			if not self.machoFile.containsAddr(classData.ivars):	print("ivars") # TODO: remove
 			self.processIvarList(classData.ivars)
 
 		if classData.baseProperties:
-			if not self.machoFile.containsAddr(classData.baseProperties):	print("baseProperties") # TODO: remove
 			self.processPropertyList(classData.baseProperties)
 
 	def processMethodList(self, methListPtr: int) -> Tuple[MachO.section_64, int]:
@@ -294,9 +293,8 @@ class ObjCConverter(object):
 				self.ptrs.append(DynPtr(methListSect, methtypeFieldOff, methtypeSect, methtypeOff))
 			
 			if meth.imp and not self.machoFile.containsAddr(meth.imp):
+				logging.warning("Could not find method implementation: " + str(meth.imp))
 				pass
-				# print("Could not find method imp: " + str(meth.imp))
-				# raise ObjCConverterUnknownError
 		
 		return methListSect, methListSectOff
 	
