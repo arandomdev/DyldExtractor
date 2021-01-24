@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from DyldExtractor.Dyld.DyldFile import DyldFile
 import typing
 import argparse
 import pathlib
@@ -14,6 +15,13 @@ def enumerateImages(dyld: Dyld.DyldFile) -> typing.List[typing.Tuple[int, str, s
 	"""Enumerate the images in the Dyld Cache.
 
 	Returned as a list of tuples containing the image index, name, and path.
+
+	Args:
+		dyld: the DyldFile to enumerate from.
+	
+	returns:
+		a list of tuples that contain the image index, name, and the path
+		of the image
 	"""
 
 	images = []
@@ -33,6 +41,14 @@ def enumerateImages(dyld: Dyld.DyldFile) -> typing.List[typing.Tuple[int, str, s
 
 
 def extractImage(dyld: Dyld.DyldFile, image: Dyld.dyld_cache_image_info, outputPath: str) -> None:
+	"""Extract and image
+	
+	Args:
+		dyld: The DyldFile to extract from.
+		image: The target image to extract.
+		outputPath: The path to extract to.
+	"""
+
 	imageOff = dyld.convertAddr(image.address)
 
 	machoFile = MachO.MachoFile.parse(dyld.file, imageOff)

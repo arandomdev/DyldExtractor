@@ -143,6 +143,27 @@ class dyld_cache_slide_info2(Structure):
 		self.pageExtrasData = self._buffer.read(self.page_extras_count * 2)
 
 
+class dyld_cache_slide_info3(Structure):
+	version: int 			# currently 3
+	page_size: int 			# currently 4096 (may also be 16384)
+	page_starts_count: int
+	auth_value_add: int
+
+	# page_starts[/* page_starts_count */]
+	pageStartsData: bytes
+
+	_fields_ = (
+		("version", "<I"),
+		("page_size", "<I"),
+		("page_starts_count", "<I"),
+		("auth_value_add", "<Q"),
+	)
+
+	def loadData(self) -> None:
+		# self._buffer.seek(self._offset + self.size)
+		pass
+
+
 class dyld_cache_local_symbols_entry(Structure):
 
 	SIZE: ClassVar[int] = 12
