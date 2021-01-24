@@ -24,26 +24,72 @@ class Slide(IntEnum):
 
 class dyld_cache_header(Structure):
 	
+	headerType: int
+
+	# headerType = 1 (dyld-95.3)
 	magic: bytes				# e.g. "dyld_v0    i386"
 	mappingOffset: int			# file offset to first dyld_cache_mapping_info
 	mappingCount: int			# number of dyld_cache_mapping_info entries
 	imagesOffset: int			# file offset to first dyld_cache_image_info
 	imagesCount: int			# number of dyld_cache_image_info entries
 	dyldBaseAddress: int		# base address of dyld when cache was built
+	
+	# headerType = 2 (dyld-195.5)
 	codeSignatureOffset: int	# file offset of code signature blob
 	codeSignatureSize: int		# size of code signature blob (zero means to end of file)
 	slideInfoOffset: int		# file offset of kernel slid info
 	slideInfoSize: int			# size of kernel slid info
+	
+	# headerType = 3 (No header file for this version (without the following UUID), but there are images of this version)
 	localSymbolsOffset: int		# file offset of where local symbols are stored
 	localSymbolsSize: int		# size of local symbols information
+	
+	# headerType = 4 (dyld-239.3)
 	uuid: bytes					# unique value for each shared cache file
+	
+	# headerType = 5 (dyld-360.14)
 	cacheType: int				# 0 for development, 1 for production
+	
+	# headerType = 6 (dyld-421.1)
 	branchPoolsOffset: int		# file offset to table of uint64_t pool addresses
 	branchPoolsCount: int		# number of uint64_t entries
 	accelerateInfoAddr: int		# (unslid) address of optimization info
 	accelerateInfoSize: int		# size of optimization info
 	imagesTextOffset: int		# file offset to first dyld_cache_image_text_info
 	imagesTextCount: int		# number of dyld_cache_image_text_info entries
+
+	# headerType = 7 (dyld-832.7.1)
+	patchInfoAddr: int 				# (unslid) address of dyld_cache_patch_info
+	patchInfoSize: int 				# Size of all of the patch information pointed to via the dyld_cache_patch_info
+	otherImageGroupAddrUnused: int 	# unused
+	otherImageGroupSizeUnused: int 	# unused
+	progClosuresAddr: int 			# (unslid) address of list of program launch closures
+	progClosuresSize: int 			# size of list of program launch closures
+	progClosuresTrieAddr: int 		# (unslid) address of trie of indexes into program launch closures
+	progClosuresTrieSize: int 		# size of trie of indexes into program launch closures
+	platform: int 					# platform number (macOS=1, etc)
+
+	CacheInformation: int 			# a bitfield
+		# formatVersion          : 8,  # dyld3::closure::kFormatVersion
+		# dylibsExpectedOnDisk   : 1,  # dyld should expect the dylib exists on disk and to compare inode/mtime to see if cache is valid
+		# simulator              : 1,  # for simulator of specified platform
+		# locallyBuiltCache      : 1,  # 0 for B&I built cache, 1 for locally built cache
+		# builtFromChainedFixups : 1,  # some dylib in cache was built using chained fixups, so patch tables must be used for overrides
+		# padding                : 20; # TBD
+	
+	sharedRegionStart: int 			# base load address of cache if not slid
+	sharedRegionSize: int 			# overall size of region cache can be mapped into
+	maxSlide: int 					# runtime slide of cache can be between zero and this value
+	dylibsImageArrayAddr: int 		# (unslid) address of ImageArray for dylibs in this cache
+	dylibsImageArraySize: int 		# size of ImageArray for dylibs in this cache
+	dylibsTrieAddr: int 			# (unslid) address of trie of indexes of all cached dylibs
+	dylibsTrieSize: int 			# size of trie of cached dylib paths
+	otherImageArrayAddr: int 		# (unslid) address of ImageArray for dylibs and bundles with dlopen closures
+	otherImageArraySize: int 		# size of ImageArray for dylibs and bundles with dlopen closures
+	otherTrieAddr: int 				# (unslid) address of trie of indexes of all dylibs and bundles with dlopen closures
+	otherTrieSize: int 				# size of trie of dylibs and bundles with dlopen closures
+	mappingWithSlideOffset: int 	# file offset to first dyld_cache_mapping_and_slide_info
+	mappingWithSlideCount: int 		# number of dyld_cache_mapping_and_slide_info entries
 
 	_fields_ = (
 		("magic", 16),
@@ -66,6 +112,29 @@ class dyld_cache_header(Structure):
 		("accelerateInfoSize", "<Q"),
 		("imagesTextOffset", "<Q"),
 		("imagesTextCount", "<Q"),
+		("patchInfoAddr", "<Q"),
+		("patchInfoSize", "<Q"),
+		("otherImageGroupAddrUnused", "<Q"),
+		("otherImageGroupSizeUnused", "<Q"),
+		("progClosuresAddr", "<Q"),
+		("progClosuresSize", "<Q"),
+		("progClosuresTrieAddr", "<Q"),
+		("progClosuresTrieSize", "<Q"),
+		("platform", "<I"),
+		("CacheInformation", "<I"),
+		("sharedRegionStart", "<Q"),
+		("sharedRegionSize", "<Q"),
+		("maxSlide", "<Q"),
+		("dylibsImageArrayAddr", "<Q"),
+		("dylibsImageArraySize", "<Q"),
+		("dylibsTrieAddr", "<Q"),
+		("dylibsTrieSize", "<Q"),
+		("otherImageArrayAddr", "<Q"),
+		("otherImageArraySize", "<Q"),
+		("otherTrieAddr", "<Q"),
+		("otherTrieSize", "<Q"),
+		("mappingWithSlideOffset", "<I"),
+		("mappingWithSlideCount", "<I"),
 	)
 
 
