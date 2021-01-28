@@ -293,7 +293,8 @@ class ObjCConverter(object):
 				self.ptrs.append(DynPtr(methListSect, methtypeFieldOff, methtypeSect, methtypeOff))
 			
 			if meth.imp and not self.machoFile.containsAddr(meth.imp):
-				logging.warning("Could not find method implementation: " + str(meth.imp))
+				# surpressing this, I have no idea what theses point to.
+				# logging.warning("Could not find method implementation: " + hex(meth.imp))
 				pass
 		
 		return methListSect, methListSectOff

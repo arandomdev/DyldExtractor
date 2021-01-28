@@ -124,21 +124,22 @@ if __name__ == "__main__":
 				images = [x for x in images if filterTerm in x[2].lower()]
 
 			print("Listing images")
-			print(f"Index| Name                                    | Path")
+			print(f"Index| {'Name':40} | Path")
 			for image in images:
 				print(f"{image[0]:4} | {image[1]:40} | {image[2]}")
 		
 		# Extract image Option
-		if args.framework:	
+		elif args.framework:	
 			targetFramework = args.framework.strip()
 			targetImageData = None
 			for image in images:
-				if targetFramework in image[1]:
+				if targetFramework == image[1]:
 					targetImageData = image
 					break
 
 			if not targetImageData:
-				print(f"Unable to find {args.framework} in cache")
+				print(f"Unable to find {targetFramework} in cache")
+				exit()
 
 			print("Extracting " + targetImageData[1])
 			if args.output:

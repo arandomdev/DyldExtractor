@@ -1,6 +1,9 @@
-from typing import ClassVar, List
-from enum import IntEnum
+from __future__ import annotations
 
+import logging
+from io import BufferedReader
+from enum import IntEnum
+from typing import ClassVar, List
 from DyldExtractor.Structure import Structure
 
 
@@ -11,7 +14,9 @@ __all__ = [
 	"dyld_cache_local_symbols_entry",
 	"dyld_cache_local_symbols_info",
 	"dyld_cache_mapping_info",
-	"dyld_cache_slide_info2"
+	"dyld_cache_slide_info2",
+	"dyld_cache_slide_info3",
+	"dyld_cache_mapping_and_slide_info"
 ]
 
 
@@ -26,39 +31,26 @@ class dyld_cache_header(Structure):
 	
 	headerType: int
 
-	# headerType = 1 (dyld-95.3)
-	magic: bytes				# e.g. "dyld_v0    i386"
-	mappingOffset: int			# file offset to first dyld_cache_mapping_info
-	mappingCount: int			# number of dyld_cache_mapping_info entries
-	imagesOffset: int			# file offset to first dyld_cache_image_info
-	imagesCount: int			# number of dyld_cache_image_info entries
-	dyldBaseAddress: int		# base address of dyld when cache was built
-	
-	# headerType = 2 (dyld-195.5)
-	codeSignatureOffset: int	# file offset of code signature blob
-	codeSignatureSize: int		# size of code signature blob (zero means to end of file)
-	slideInfoOffset: int		# file offset of kernel slid info
-	slideInfoSize: int			# size of kernel slid info
-	
-	# headerType = 3 (No header file for this version (without the following UUID), but there are images of this version)
-	localSymbolsOffset: int		# file offset of where local symbols are stored
-	localSymbolsSize: int		# size of local symbols information
-	
-	# headerType = 4 (dyld-239.3)
-	uuid: bytes					# unique value for each shared cache file
-	
-	# headerType = 5 (dyld-360.14)
-	cacheType: int				# 0 for development, 1 for production
-	
-	# headerType = 6 (dyld-421.1)
-	branchPoolsOffset: int		# file offset to table of uint64_t pool addresses
-	branchPoolsCount: int		# number of uint64_t entries
-	accelerateInfoAddr: int		# (unslid) address of optimization info
-	accelerateInfoSize: int		# size of optimization info
-	imagesTextOffset: int		# file offset to first dyld_cache_image_text_info
-	imagesTextCount: int		# number of dyld_cache_image_text_info entries
-
-	# headerType = 7 (dyld-832.7.1)
+	magic: bytes					# e.g. "dyld_v0    i386"
+	mappingOffset: int				# file offset to first dyld_cache_mapping_info
+	mappingCount: int				# number of dyld_cache_mapping_info entries
+	imagesOffset: int				# file offset to first dyld_cache_image_info
+	imagesCount: int				# number of dyld_cache_image_info entries
+	dyldBaseAddress: int			# base address of dyld when cache was built
+	codeSignatureOffset: int		# file offset of code signature blob
+	codeSignatureSize: int			# size of code signature blob (zero means to end of file)
+	slideInfoOffset: int			# file offset of kernel slid info
+	slideInfoSize: int				# size of kernel slid info
+	localSymbolsOffset: int			# file offset of where local symbols are stored
+	localSymbolsSize: int			# size of local symbols information
+	uuid: bytes						# unique value for each shared cache file
+	cacheType: int					# 0 for development, 1 for production
+	branchPoolsOffset: int			# file offset to table of uint64_t pool addresses
+	branchPoolsCount: int			# number of uint64_t entries
+	accelerateInfoAddr: int			# (unslid) address of optimization info
+	accelerateInfoSize: int			# size of optimization info
+	imagesTextOffset: int			# file offset to first dyld_cache_image_text_info
+	imagesTextCount: int			# number of dyld_cache_image_text_info entries
 	patchInfoAddr: int 				# (unslid) address of dyld_cache_patch_info
 	patchInfoSize: int 				# Size of all of the patch information pointed to via the dyld_cache_patch_info
 	otherImageGroupAddrUnused: int 	# unused
@@ -68,15 +60,13 @@ class dyld_cache_header(Structure):
 	progClosuresTrieAddr: int 		# (unslid) address of trie of indexes into program launch closures
 	progClosuresTrieSize: int 		# size of trie of indexes into program launch closures
 	platform: int 					# platform number (macOS=1, etc)
-
-	CacheInformation: int 			# a bitfield
+	CacheInfoBitfield: int 			# a bitfield
 		# formatVersion          : 8,  # dyld3::closure::kFormatVersion
 		# dylibsExpectedOnDisk   : 1,  # dyld should expect the dylib exists on disk and to compare inode/mtime to see if cache is valid
 		# simulator              : 1,  # for simulator of specified platform
 		# locallyBuiltCache      : 1,  # 0 for B&I built cache, 1 for locally built cache
 		# builtFromChainedFixups : 1,  # some dylib in cache was built using chained fixups, so patch tables must be used for overrides
 		# padding                : 20; # TBD
-	
 	sharedRegionStart: int 			# base load address of cache if not slid
 	sharedRegionSize: int 			# overall size of region cache can be mapped into
 	maxSlide: int 					# runtime slide of cache can be between zero and this value
@@ -87,7 +77,7 @@ class dyld_cache_header(Structure):
 	otherImageArrayAddr: int 		# (unslid) address of ImageArray for dylibs and bundles with dlopen closures
 	otherImageArraySize: int 		# size of ImageArray for dylibs and bundles with dlopen closures
 	otherTrieAddr: int 				# (unslid) address of trie of indexes of all dylibs and bundles with dlopen closures
-	otherTrieSize: int 				# size of trie of dylibs and bundles with dlopen closures
+	otherTrieSize: int 				# size of trie of dylibs and bundles with dlopen closures	
 	mappingWithSlideOffset: int 	# file offset to first dyld_cache_mapping_and_slide_info
 	mappingWithSlideCount: int 		# number of dyld_cache_mapping_and_slide_info entries
 
@@ -121,7 +111,7 @@ class dyld_cache_header(Structure):
 		("progClosuresTrieAddr", "<Q"),
 		("progClosuresTrieSize", "<Q"),
 		("platform", "<I"),
-		("CacheInformation", "<I"),
+		("CacheInfoBitfield", "<I"),
 		("sharedRegionStart", "<Q"),
 		("sharedRegionSize", "<Q"),
 		("maxSlide", "<Q"),
@@ -136,6 +126,62 @@ class dyld_cache_header(Structure):
 		("mappingWithSlideOffset", "<I"),
 		("mappingWithSlideCount", "<I"),
 	)
+
+	@classmethod
+	def parse(cls, buffer: BufferedReader, fileOffset: int, loadData: bool = True) -> dyld_cache_header:
+		inst = super().parse(buffer, fileOffset, loadData=loadData)
+
+		# The mappingOffset is directly after this header, because of that
+		# we can determine the correct size of this
+		search = lambda field: inst.offsetOf(field[0]) == inst.mappingOffset
+		fieldCutoff = next(filter(search, inst._fields_), None)
+
+		if inst.mappingOffset == 0x140:
+			inst.cutoffPoint = -1
+		elif not fieldCutoff:
+			logging.warning("Unable to determine dyld_cache_header length")
+			inst.cutoffPoint = -1
+		else:
+			# zero out the unused fields
+			inst.cutoffPoint = inst._fields_.index(fieldCutoff)
+			targetFields = inst._fields_[inst.cutoffPoint:]
+			for field in targetFields:
+				setattr(inst, field[0], None)
+
+		return inst
+	
+	def containsField(self, field: str) -> bool:
+		"""Check that a field is available within the header.
+
+		args:
+			field: the field to check
+		"""
+
+		fieldIndex = -1
+		for f in self._fields_:
+			if f[0] == field:
+				fieldIndex = self._fields_.index(f)
+				break
+		
+		if fieldIndex == -1:
+			return False
+
+		if self.cutoffPoint -1:
+			return True
+		
+		if fieldIndex >= self.cutoffPoint:
+			return False
+		else:
+			return True
+
+	def asBytes(self) -> bytes:
+		data = super().asBytes()
+
+		# delete data after the cutoff point
+		cutoffIndex = self.offsetOf(self._fields_[self.cutoffPoint])
+		data = data[0:cutoffIndex]
+
+		return data
 
 
 class dyld_cache_mapping_info(Structure):
@@ -281,3 +327,28 @@ class dyld_cache_local_symbols_info(Structure):
 		for i in range(0, self.entriesCount):
 			offset = (i * dyld_cache_local_symbols_entry.SIZE) + self._offset + self.entriesOffset
 			self.entries.append(dyld_cache_local_symbols_entry.parse(self._buffer, offset))
+
+
+class dyld_cache_mapping_and_slide_info(Structure):
+
+	SIZE: ClassVar[int] = 56
+	
+	address: int
+	size: int
+	fileOffset: int
+	slideInfoFileOffset: int
+	slideInfoFileSize: int
+	flags: int
+	maxProt: int
+	initProt: int
+
+	_fields_ = (
+		("address", "<Q"),
+		("size", "<Q"),
+		("fileOffset", "<Q"),
+		("slideInfoFileOffset", "<Q"),
+		("slideInfoFileSize", "<Q"),
+		("flags", "<Q"),
+		("maxProt", "<I"),
+		("initProt", "<I"),
+	)

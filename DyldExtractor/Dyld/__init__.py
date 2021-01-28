@@ -10,5 +10,7 @@ __all__ = [
 	"dyld_cache_local_symbols_entry",
 	"dyld_cache_local_symbols_info",
 	"dyld_cache_mapping_info",
-	"dyld_cache_slide_info2"
+	"dyld_cache_slide_info2",
+	"dyld_cache_slide_info3",
+	"dyld_cache_mapping_and_slide_info"
 ]

@@ -23,7 +23,6 @@ class DyldFile(object):
 
 	header: DyldStructs.dyld_cache_header
 	localSymbolInfo: DyldStructs.dyld_cache_local_symbols_info
-	slideInfo: DyldStructs.dyld_cache_slide_info2
 
 	mappings: List[DyldStructs.dyld_cache_image_info]
 	images: List[DyldStructs.dyld_cache_image_info]
@@ -37,20 +36,6 @@ class DyldFile(object):
 			self.localSymbolInfo = DyldStructs.dyld_cache_local_symbols_info.parse(dyldFile, self.header.localSymbolsOffset)
 		else:
 			self.localSymbolInfo = None
-		
-		if self.header.slideInfoSize:
-			self.slideInfo = DyldStructs.dyld_cache_slide_info2.parse(dyldFile, self.header.slideInfoOffset, loadData=False)
-
-			# check the version
-			if self.slideInfo.version == 2:
-				self.slideInfo.loadData()
-			elif self.slideInfo.version == 3:
-				self.slideInfo = DyldStructs.dyld_cache_slide_info3.parse(dyldFile, self.header.slideInfoOffset)
-			else:
-				self.slideInfo = None
-				logging.warning("Unknown slide version.")
-		else:
-			self.slideInfo = None
 
 		self.mappings = []
 		for i in range(self.header.mappingCount):

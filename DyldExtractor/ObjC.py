@@ -68,7 +68,7 @@ class method_t(Structure):
 
 class method_list_t(Structure):
 
-	SIZE: typing.ClassVar[int] = 8
+	SIZE: ClassVar[int] = 8
 
 	entsize: int
 	count: int

@@ -1,5 +1,6 @@
 import struct
 import typing
+import logging
 
 from DyldExtractor import MachO
 from DyldExtractor import Dyld
@@ -88,7 +89,7 @@ class LinkeditConverter(object):
 		entries in the new symbol table.
 		"""
 		
-		symtabCommand: Macho.symtab_command = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_SYMTAB)
+		symtabCommand: MachO.symtab_command = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_SYMTAB)
 
 		# count local symbols
 		entryCount = self.localSymEntry.nlistCount
@@ -103,7 +104,7 @@ class LinkeditConverter(object):
 			entryCount += 1
 
 		# add indirect symbols
-		dysymtabCommand: Macho.dysymtab_command = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_DYSYMTAB)
+		dysymtabCommand: MachO.dysymtab_command = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_DYSYMTAB)
 		entryCount += dysymtabCommand.nindirectsyms
 
 		# add room for N_INDR symbols for re-exported symbols
@@ -118,11 +119,11 @@ class LinkeditConverter(object):
 		newStrData = b"\x00"
 		newSymTab = b""
 
-		symtabCommand: Macho.symtab_command = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_SYMTAB)
+		symtabCommand: MachO.symtab_command = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_SYMTAB)
 
 		# copy original symbols
 		for i in range(0, len(symtabCommand.symbolData), MachO.nlist_64.SIZE):
-			symEntry: Macho.nlist_64 = MachO.nlist_64.parseBytes(symtabCommand.symbolData, i)
+			symEntry: MachO.nlist_64 = MachO.nlist_64.parseBytes(symtabCommand.symbolData, i)
 
 			# skip local symbols for now
 			if (symEntry.n_type & (MachO.NList.N_TYPE | MachO.NList.N_EXT)) == MachO.NList.N_SECT:
@@ -156,7 +157,7 @@ class LinkeditConverter(object):
 		
 		# add the local symbols
 		# but first update the load commands
-		dysymtabCommand: Macho.dysymtab_command = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_DYSYMTAB)
+		dysymtabCommand: MachO.dysymtab_command = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_DYSYMTAB)
 		dysymtabCommand.ilocalsym = int(len(newSymTab) / MachO.nlist_64.SIZE)
 		dysymtabCommand.nlocalsym = self.localSymEntry.nlistCount
 
@@ -247,6 +248,35 @@ class RebaseConverter(object):
 			Starts the conversion.
 		"""
 
+		# get the slide info
+		slideInfoOffset = 0
+		if self.dyldFile.header.slideInfoOffset:
+			slideInfoOffset = self.dyldFile.header.slideInfoOffset
+		else:
+			if not self.dyldFile.header.containsField("mappingWithSlideOffset"):
+				logging.error("Unable to get slide info")
+				return
+
+			# get the second mapping info
+			mappingOff = self.dyldFile.header.mappingWithSlideOffset + Dyld.dyld_cache_mapping_and_slide_info.SIZE
+			mappingInfo = Dyld.dyld_cache_mapping_and_slide_info.parse(self.dyldFile.file, mappingOff)
+			
+			if not mappingInfo.slideInfoFileOffset:
+				logging.error("Unable to get slide info")
+				return
+			
+			slideInfoOffset = mappingInfo.slideInfoFileOffset
+		
+		# check version
+		self.slideInfo = Dyld.dyld_cache_slide_info2.parse(self.dyldFile.file, slideInfoOffset)
+		if self.slideInfo.version == 2:
+			pass
+		elif self.slideInfo.version == 3:
+			self.slideInfo = Dyld.dyld_cache_slide_info3.parse(self.dyldFile.file, slideInfoOffset)
+		else:
+			logging.error("Unable to get slide info")
+			return
+
 		self.rebaseSegment(self.machoFile.getSegment(b"__DATA_CONST\x00"))
 		self.rebaseSegment(self.machoFile.getSegment(b"__DATA\x00"))
 		self.rebaseSegment(self.machoFile.getSegment(b"__DATA_DIRTY\x00"))
@@ -265,7 +295,7 @@ class RebaseConverter(object):
 		dataStart = self.dyldFile.mappings[1].address
 
 		# get the page index which contains the start and end of the segment.
-		pageSize = self.dyldFile.slideInfo.page_size
+		pageSize = self.slideInfo.page_size
 		startPageAddr = segment.vmaddr - dataStart
 		startPage = int(startPageAddr / pageSize)
 		
@@ -273,7 +303,7 @@ class RebaseConverter(object):
 		endPage = int(endPageAddr / pageSize)
 
 		# process each page
-		pageStarts = struct.iter_unpack("<H", self.dyldFile.slideInfo.pageStartsData)
+		pageStarts = struct.iter_unpack("<H", self.slideInfo.pageStartsData)
 		pageStarts = [page[0] for page in pageStarts]
 		for i in range(startPage, endPage):
 			page = pageStarts[i]
@@ -311,9 +341,9 @@ class RebaseConverter(object):
 
 		segmentIndex = self.machoFile.loadCommands.index(segment)
 		
-		deltaMask = self.dyldFile.slideInfo.delta_mask
+		deltaMask = self.slideInfo.delta_mask
 		valueMask = ~deltaMask
-		valueAdd = self.dyldFile.slideInfo.value_add
+		valueAdd = self.slideInfo.value_add
 
 		# basically __builtin_ctzll(deltaMask) - 2;
 		deltaShift = "{0:b}".format(deltaMask)
@@ -365,9 +395,9 @@ class RebaseConverter(object):
 		# write it
 		sectionOff = fileOffset - containingSect.offset
 
-		sectionData = section.sectionData[0:sectionOff]
+		sectionData = containingSect.sectionData[0:sectionOff]
 		sectionData += struct.pack("<Q", value)
-		sectionData += section.sectionData[sectionOff+8:]
+		sectionData += containingSect.sectionData[sectionOff+8:]
 		containingSect.sectionData = sectionData
 	
 	def finalize(self) -> None:
