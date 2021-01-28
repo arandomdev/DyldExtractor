@@ -51,6 +51,28 @@ class class_rw_t(Structure):
 	)
 
 
+class entsize_list_tt(Structure):
+
+	entsizeAndFlags: int
+	count: int
+
+	elementList: List[Structure]
+
+	_fields_ = (
+		("entsizeAndFlags", "<I")
+		("count", "<I")
+	)
+
+	@classmethod
+	def parse(cls, buffer: BufferedReader, fileOffset: int, element: Structure, flagMask: int, loadData: bool=True):
+		inst = super().parse(buffer, fileOffset, loadData=loadData)
+
+		inst.elementType = element
+		inst.flagmask = flagMask
+
+		return inst
+
+
 class method_t(Structure):
 
 	SIZE: ClassVar[int] = 24
