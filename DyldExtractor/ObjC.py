@@ -51,6 +51,31 @@ class class_rw_t(Structure):
 	)
 
 
+class RelativePointer(Structure):
+
+	offset: int
+
+	_fields_ = (
+		("offset", "<i")
+	)
+
+	@classmethod
+	def parse(cls, buffer: BufferedReader, offset: int, vmAddr: int, loadData: bool) -> Structure:
+		inst = super().parse(buffer, offset, loadData=loadData)
+
+		inst.vmAddr = vmAddr
+		return inst
+
+	def getP(self):
+		"""Return the pointer.
+		"""
+
+		if self.offset == 0:
+			return 0
+
+		return self.vmAddr + self.offset
+
+
 class entsize_list_tt(Structure):
 
 	entsizeAndFlags: int
@@ -72,6 +97,12 @@ class entsize_list_tt(Structure):
 
 		return inst
 
+	def entsize(self):
+		return self.entsizeAndFlags & ~self.flagmask
+	
+	def flags(self):
+		return self.entsizeAndFlags & self.flagmask
+
 
 class method_t(Structure):
 
@@ -88,7 +119,7 @@ class method_t(Structure):
 	)
 
 
-class method_list_t(Structure):
+class method_list_t(entsize_list_tt):
 
 	SIZE: ClassVar[int] = 8
 
@@ -104,7 +135,7 @@ class method_list_t(Structure):
 
 	@classmethod
 	def parse(cls, buffer: BufferedReader, fileOffset: int, loadData: bool = True) -> method_list_t:
-		inst = super().parse(buffer, fileOffset, loadData=loadData)
+		inst = super().parse(buffer, fileOffset, method_t, 0xffff0003, loadData=loadData)
 
 		inst.methods = []
 		for i in range(0, inst.count):
