@@ -230,16 +230,18 @@ class ObjCConverter(object):
 			as its offset in the section.
 		"""
 		methListOff = self.dyldFile.convertAddr(methListPtr)
-		methList = ObjC.method_list_t.parse(self.dyldFile.file, methListOff)
+		methList = ObjC.method_list_t.parse(self.dyldFile.file, methListOff, methListPtr)
 
 		methListSect = None
 		methListSectOff = None
 
 		methListData = methList.asBytes()
 		for meth in methList.methods:
-			meth.name &= 0xffffffffff
-			meth.type &= 0xffffffffff
-			meth.imp &= 0xffffffffff
+			if not meth.isSmall:
+				meth.name &= 0xffffffffff
+				meth.type &= 0xffffffffff
+				meth.imp &= 0xffffffffff
+
 			methListData += meth.asBytes()
 
 		if self.machoFile.containsAddr(methListPtr):
@@ -260,11 +262,12 @@ class ObjCConverter(object):
 		
 		# pull in method_t data
 		for meth in methList.methods:
-			if not self.machoFile.containsAddr(meth.name):
+			methNamePtr = meth.name.getP() if meth.isSmall else meth.name
+			if not self.machoFile.containsAddr(methNamePtr):
 				origSeg = self.machoFile.getSegment(b"__TEXT\x00", b"__objc_methname\x00")
 				methnameSect = self.getExtraSection(origSeg[0], origSeg[1])
 
-				name = self.dyldFile.readString(self.dyldFile.convertAddr(meth.name))
+				name = self.dyldFile.readString(self.dyldFile.convertAddr(methNamePtr))
 				nameOff = None
 
 				if name in methnameSect.sectionData:

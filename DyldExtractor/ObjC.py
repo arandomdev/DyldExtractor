@@ -1,6 +1,8 @@
 from __future__ import annotations
-from typing import ClassVar, List
+from typing import ClassVar, List, Union
 from io import BufferedReader
+
+import struct
 
 from DyldExtractor.Structure import Structure
 
@@ -56,7 +58,7 @@ class RelativePointer(Structure):
 	offset: int
 
 	_fields_ = (
-		("offset", "<i")
+		("offset", "<i"),
 	)
 
 	@classmethod
@@ -84,8 +86,8 @@ class entsize_list_tt(Structure):
 	elementList: List[Structure]
 
 	_fields_ = (
-		("entsizeAndFlags", "<I")
-		("count", "<I")
+		("entsizeAndFlags", "<I"),
+		("count", "<I"),
 	)
 
 	@classmethod
@@ -106,42 +108,76 @@ class entsize_list_tt(Structure):
 
 class method_t(Structure):
 
-	SIZE: ClassVar[int] = 24
+	smallMethodListFlag = 0x80000000
+	isSmall: bool
+	size: int
 
-	name: int
-	type: int
-	imp: int
+	name: Union[int, RelativePointer]
+	type: Union[int, RelativePointer]
+	imp: Union[int, RelativePointer]
 
-	_fields_ = (
-		("name", "<Q"),
-		("type", "<Q"),
-		("imp", "<Q"),
-	)
+	@classmethod
+	def parse(cls, buffer: BufferedReader, offset: int, vmAddr: int, loadData: bool) -> method_t:
+		inst = super().parse(buffer, offset, loadData=loadData)
+
+		buffer.seek(offset)
+		inst.isSmall = (struct.unpack("<Q", buffer.read(8))[0] & 1) == 1
+
+		size = 12 if inst.isSmall else 24
+
+		if inst.isSmall:
+			inst.name = RelativePointer.parse(buffer, offset, vmAddr, loadData=loadData)
+			inst.type = RelativePointer.parse(buffer, offset + 4, vmAddr + 4, loadData=loadData)
+			inst.imp = RelativePointer.parse(buffer, offset + 8, vmAddr + 8, loadData=loadData)
+		else:
+			buffer.seek(offset)
+			data = buffer.read(24)
+			inst.name = struct.unpack_from("<Q", data, 0)[0]
+			inst.type = struct.unpack_from("<Q", data, 4)[0]
+			inst.imp = struct.unpack_from("<Q", data, 8)[0]
+
+		return inst
+	
+	def asBytes(self) -> bytes:
+		data = super().asBytes()
+
+		if self.isSmall:
+			data += self.name.asBytes()
+			data += self.type.asBytes()
+			data += self.imp.asBytes()
+		else:
+			data += struct.pack("<Q", self.name)
+			data += struct.pack("<Q", self.type)
+			data += struct.pack("<Q", self.imp)
+
+		return data
 
 
 class method_list_t(entsize_list_tt):
 
 	SIZE: ClassVar[int] = 8
 
-	entsize: int
-	count: int
-
 	methods: List[method_t]
 
 	_fields_ = (
-		("entsize", "<I"),
-		("count", "<I"),
+
 	)
 
 	@classmethod
-	def parse(cls, buffer: BufferedReader, fileOffset: int, loadData: bool = True) -> method_list_t:
+	def parse(cls, buffer: BufferedReader, fileOffset: int, vmAddr: int, loadData: bool = True) -> method_list_t:
 		inst = super().parse(buffer, fileOffset, method_t, 0xffff0003, loadData=loadData)
 
+		methodSize = method_t.SMALL_SIZE if inst.isSmallList() else method_t.BIG_SIZE
 		inst.methods = []
 		for i in range(0, inst.count):
-			methodOff = fileOffset + inst.SIZE + (i * method_t.SIZE)
-			inst.methods.append(method_t.parse(buffer, methodOff, loadData=loadData))
+			methodOff = fileOffset + inst.SIZE + (i * methodSize)
+			methAddr = vmAddr + inst.SIZE + (i * methodSize)
+			inst.methods.append(method_t.parse(buffer, methodOff, methAddr, loadData=loadData))
+		
 		return inst
+	
+	def isSmallList(self):
+		return self.entsizeAndFlags & method_t.smallMethodListFlag
 
 
 class protocol_t(Structure):
