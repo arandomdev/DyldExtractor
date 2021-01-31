@@ -123,7 +123,7 @@ class method_t(Structure):
 		buffer.seek(offset)
 		inst.isSmall = (struct.unpack("<Q", buffer.read(8))[0] & 1) == 1
 
-		size = 12 if inst.isSmall else 24
+		inst.size = 12 if inst.isSmall else 24
 
 		if inst.isSmall:
 			inst.name = RelativePointer.parse(buffer, offset, vmAddr, loadData=loadData)
@@ -151,6 +151,14 @@ class method_t(Structure):
 			data += struct.pack("<Q", self.imp)
 
 		return data
+	
+	def offsetOf(self, field) -> int:
+		if field == "name":
+			return 0
+		elif field == "type":
+			return 4 if self.isSmall else 8
+		elif field == "imp":
+			return 8 if self.isSmall else 16
 
 
 class method_list_t(entsize_list_tt):
@@ -167,7 +175,7 @@ class method_list_t(entsize_list_tt):
 	def parse(cls, buffer: BufferedReader, fileOffset: int, vmAddr: int, loadData: bool = True) -> method_list_t:
 		inst = super().parse(buffer, fileOffset, method_t, 0xffff0003, loadData=loadData)
 
-		methodSize = method_t.SMALL_SIZE if inst.isSmallList() else method_t.BIG_SIZE
+		methodSize = 12 if inst.isSmallList() else 24
 		inst.methods = []
 		for i in range(0, inst.count):
 			methodOff = fileOffset + inst.SIZE + (i * methodSize)
