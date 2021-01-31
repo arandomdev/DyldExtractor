@@ -273,6 +273,8 @@ class RebaseConverter(object):
 			pass
 		elif self.slideInfo.version == 3:
 			self.slideInfo = Dyld.dyld_cache_slide_info3.parse(self.dyldFile.file, slideInfoOffset)
+			logging.error("Slide info version 3 is not supported")
+			return
 		else:
 			logging.error("Unable to get slide info")
 			return
