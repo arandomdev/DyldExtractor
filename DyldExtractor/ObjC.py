@@ -116,12 +116,13 @@ class method_t(Structure):
 	type: Union[int, RelativePointer]
 	imp: Union[int, RelativePointer]
 
+	_fields_ = ()
+
 	@classmethod
-	def parse(cls, buffer: BufferedReader, offset: int, vmAddr: int, loadData: bool) -> method_t:
+	def parse(cls, buffer: BufferedReader, offset: int, vmAddr: int, isSmall: bool=False, loadData: bool=True) -> method_t:
 		inst = super().parse(buffer, offset, loadData=loadData)
 
-		buffer.seek(offset)
-		inst.isSmall = (struct.unpack("<Q", buffer.read(8))[0] & 1) == 1
+		inst.isSmall = isSmall
 
 		inst.size = 12 if inst.isSmall else 24
 
@@ -175,12 +176,13 @@ class method_list_t(entsize_list_tt):
 	def parse(cls, buffer: BufferedReader, fileOffset: int, vmAddr: int, loadData: bool = True) -> method_list_t:
 		inst = super().parse(buffer, fileOffset, method_t, 0xffff0003, loadData=loadData)
 
-		methodSize = 12 if inst.isSmallList() else 24
+		isSmallList = inst.isSmallList()
+		methodSize = 12 if isSmallList else 24
 		inst.methods = []
 		for i in range(0, inst.count):
 			methodOff = fileOffset + inst.SIZE + (i * methodSize)
 			methAddr = vmAddr + inst.SIZE + (i * methodSize)
-			inst.methods.append(method_t.parse(buffer, methodOff, methAddr, loadData=loadData))
+			inst.methods.append(method_t.parse(buffer, methodOff, methAddr, isSmall=isSmallList, loadData=loadData))
 		
 		return inst
 	
