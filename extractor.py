@@ -67,7 +67,7 @@ def extractImage(dyld: Dyld.DyldFile, image: Dyld.dyld_cache_image_info, outputP
 
 	# fix stubs and references to stubs
 	logging.info("Starting StubConverter")
-	Converter.StubConverter(machoFile, dyld).convert()
+	# Converter.StubConverter(machoFile, dyld).convert()
 
 	# fix and decache ObjC info
 	logging.info("Starting ObjCConverter")

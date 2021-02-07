@@ -308,7 +308,7 @@ class ObjCConverter(object):
 				self.ptrs.append(DynPtr(methListSect, methtypeFieldOff, methtypeSect, methtypeOff, meth.isSmall))
 			
 			methImpPtr = meth.imp.getP() if meth.isSmall else meth.imp
-			if meth.imp and not self.machoFile.containsAddr(methImpPtr):
+			if methImpPtr and not self.machoFile.containsAddr(methImpPtr):
 				# surpressing this, I have no idea what theses point to.
 				logging.warning("Could not find method implementation: " + hex(methImpPtr))
 				pass
