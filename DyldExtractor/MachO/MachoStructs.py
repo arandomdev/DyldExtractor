@@ -560,7 +560,7 @@ class rpath_command(load_command):
 
 class nlist_64(Structure):
 
-	SIZE: typing.ClassVar[int] = 16
+	SIZE: ClassVar[int] = 16
 	
 	n_strx: int 	# index into the string table
 	n_type: int 	# type flag, see below

@@ -16,18 +16,29 @@ class DynPtr(object):
 		Tracks the location of a pointer within a section.
 	"""
 
-	def __init__(self, sourceSection: MachO.section_64, sourceOffset: int, targetSection: MachO.section_64, targetOffset: int) -> None:
+	def __init__(self, sourceSection: MachO.section_64, sourceOffset: int, targetSection: MachO.section_64, targetOffset: int, isRelative: bool=False) -> None:
 		self.sourceSection = sourceSection
 		self.sourceOffset = sourceOffset
 		self.targetSection = targetSection
 		self.targetOffset = targetOffset
+
+		self.isRelative = isRelative
 	
 	def finalize(self):
-		pointer = struct.pack("<Q", self.targetSection.addr + self.targetOffset)
+		pointer = None
+		if self.isRelative:
+			sourcePtr = self.sourceSection.addr + self.sourceOffset
+			targetPtr = self.targetSection.addr + self.targetOffset
+
+			offset = targetPtr - sourcePtr
+			pointer = struct.pack("<i", offset)
+			pass
+		else:
+			pointer = struct.pack("<Q", self.targetSection.addr + self.targetOffset)
 		
 		newData = self.sourceSection.sectionData[0:self.sourceOffset]
 		newData += pointer
-		newData += self.sourceSection.sectionData[self.sourceOffset+8:]
+		newData += self.sourceSection.sectionData[self.sourceOffset+len(pointer):]
 		self.sourceSection.sectionData = newData
 
 
@@ -77,7 +88,7 @@ class ObjCConverter(object):
 		segments: List[MachO.segment_command_64] = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_SEGMENT_64, multiple=True)
 
 		# Segments we need to zero out a byte on
-		zero_segments = [b"classrefs", b"superrefs", b"protorefs", b"objc_data"]
+		zero_segments = [b"classrefs", b"superrefs", b"protorefs"]
 
 		for segment in segments:
 			for section in segment.sections:
@@ -230,16 +241,18 @@ class ObjCConverter(object):
 			as its offset in the section.
 		"""
 		methListOff = self.dyldFile.convertAddr(methListPtr)
-		methList = ObjC.method_list_t.parse(self.dyldFile.file, methListOff)
+		methList = ObjC.method_list_t.parse(self.dyldFile.file, methListOff, methListPtr)
 
 		methListSect = None
 		methListSectOff = None
 
 		methListData = methList.asBytes()
 		for meth in methList.methods:
-			meth.name &= 0xffffffffff
-			meth.type &= 0xffffffffff
-			meth.imp &= 0xffffffffff
+			if not meth.isSmall:
+				meth.name &= 0xffffffffff
+				meth.type &= 0xffffffffff
+				meth.imp &= 0xffffffffff
+
 			methListData += meth.asBytes()
 
 		if self.machoFile.containsAddr(methListPtr):
@@ -260,11 +273,12 @@ class ObjCConverter(object):
 		
 		# pull in method_t data
 		for meth in methList.methods:
-			if not self.machoFile.containsAddr(meth.name):
+			methNamePtr = meth.name.getP() if meth.isSmall else meth.name
+			if not self.machoFile.containsAddr(methNamePtr):
 				origSeg = self.machoFile.getSegment(b"__TEXT\x00", b"__objc_methname\x00")
 				methnameSect = self.getExtraSection(origSeg[0], origSeg[1])
 
-				name = self.dyldFile.readString(self.dyldFile.convertAddr(meth.name))
+				name = self.dyldFile.readString(self.dyldFile.convertAddr(methNamePtr))
 				nameOff = None
 
 				if name in methnameSect.sectionData:
@@ -273,14 +287,15 @@ class ObjCConverter(object):
 					nameOff = len(methnameSect.sectionData)
 					methnameSect.sectionData += name
 				
-				nameFieldOff = methListSectOff + methList.SIZE + (methList.methods.index(meth) * meth.SIZE)
-				self.ptrs.append(DynPtr(methListSect, nameFieldOff, methnameSect, nameOff))
+				nameFieldOff = methListSectOff + methList.SIZE + (methList.methods.index(meth) * meth.size)
+				self.ptrs.append(DynPtr(methListSect, nameFieldOff, methnameSect, nameOff, meth.isSmall))
 			
-			if not self.machoFile.containsAddr(meth.type):
+			methTypePtr = meth.type.getP() if meth.isSmall else meth.type
+			if not self.machoFile.containsAddr(methTypePtr):
 				origSeg = self.machoFile.getSegment(b"__TEXT\x00", b"__objc_methtype\x00")
 				methtypeSect = self.getExtraSection(origSeg[0], origSeg[1])
 
-				methtype = self.dyldFile.readString(self.dyldFile.convertAddr(meth.type))
+				methtype = self.dyldFile.readString(self.dyldFile.convertAddr(methTypePtr))
 				methtypeOff = None
 
 				if methtype in methtypeSect.sectionData:
@@ -289,12 +304,14 @@ class ObjCConverter(object):
 					methtypeOff = len(methtypeSect.sectionData)
 					methtypeSect.sectionData += methtype
 				
-				methtypeFieldOff = methListSectOff + methList.SIZE + (methList.methods.index(meth) * meth.SIZE) + meth.offsetOf("type")
-				self.ptrs.append(DynPtr(methListSect, methtypeFieldOff, methtypeSect, methtypeOff))
+				methtypeFieldOff = methListSectOff + methList.SIZE + (methList.methods.index(meth) * meth.size) + meth.offsetOf("type")
+				self.ptrs.append(DynPtr(methListSect, methtypeFieldOff, methtypeSect, methtypeOff, meth.isSmall))
 			
-			if meth.imp and not self.machoFile.containsAddr(meth.imp):
-				# surpressing this, I have no idea what theses point to.
-				# logging.warning("Could not find method implementation: " + hex(meth.imp))
+			methImpPtr = meth.imp.getP() if meth.isSmall else meth.imp
+			if methImpPtr and not self.machoFile.containsAddr(methImpPtr):
+				# surpressing this, mostly caused by protocol methods,
+				# I need to find a better way to handle this.
+				# logging.warning("Could not find method implementation: " + hex(methImpPtr))
 				pass
 		
 		return methListSect, methListSectOff

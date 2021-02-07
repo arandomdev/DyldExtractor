@@ -1,6 +1,8 @@
 from __future__ import annotations
-from typing import ClassVar, List
+from typing import ClassVar, List, Union
 from io import BufferedReader
+
+import struct
 
 from DyldExtractor.Structure import Structure
 
@@ -51,44 +53,141 @@ class class_rw_t(Structure):
 	)
 
 
-class method_t(Structure):
+class RelativePointer(Structure):
 
-	SIZE: ClassVar[int] = 24
-
-	name: int
-	type: int
-	imp: int
+	offset: int
 
 	_fields_ = (
-		("name", "<Q"),
-		("type", "<Q"),
-		("imp", "<Q"),
+		("offset", "<i"),
 	)
 
+	@classmethod
+	def parse(cls, buffer: BufferedReader, offset: int, vmAddr: int, loadData: bool) -> Structure:
+		inst = super().parse(buffer, offset, loadData=loadData)
 
-class method_list_t(Structure):
+		inst.vmAddr = vmAddr
+		return inst
 
-	SIZE: ClassVar[int] = 8
+	def getP(self):
+		"""Return the pointer.
+		"""
 
-	entsize: int
+		if self.offset == 0:
+			return 0
+
+		return self.vmAddr + self.offset
+
+
+class entsize_list_tt(Structure):
+
+	entsizeAndFlags: int
 	count: int
 
-	methods: List[method_t]
+	elementList: List[Structure]
 
 	_fields_ = (
-		("entsize", "<I"),
+		("entsizeAndFlags", "<I"),
 		("count", "<I"),
 	)
 
 	@classmethod
-	def parse(cls, buffer: BufferedReader, fileOffset: int, loadData: bool = True) -> method_list_t:
+	def parse(cls, buffer: BufferedReader, fileOffset: int, element: Structure, flagMask: int, loadData: bool=True):
 		inst = super().parse(buffer, fileOffset, loadData=loadData)
 
+		inst.elementType = element
+		inst.flagmask = flagMask
+
+		return inst
+
+	def entsize(self):
+		return self.entsizeAndFlags & ~self.flagmask
+	
+	def flags(self):
+		return self.entsizeAndFlags & self.flagmask
+
+
+class method_t(Structure):
+
+	smallMethodListFlag = 0x80000000
+	isSmall: bool
+	size: int
+
+	name: Union[int, RelativePointer]
+	type: Union[int, RelativePointer]
+	imp: Union[int, RelativePointer]
+
+	_fields_ = ()
+
+	@classmethod
+	def parse(cls, buffer: BufferedReader, offset: int, vmAddr: int, isSmall: bool=False, loadData: bool=True) -> method_t:
+		inst = super().parse(buffer, offset, loadData=loadData)
+
+		inst.isSmall = isSmall
+
+		inst.size = 12 if inst.isSmall else 24
+
+		if inst.isSmall:
+			inst.name = RelativePointer.parse(buffer, offset, vmAddr, loadData=loadData)
+			inst.type = RelativePointer.parse(buffer, offset + 4, vmAddr + 4, loadData=loadData)
+			inst.imp = RelativePointer.parse(buffer, offset + 8, vmAddr + 8, loadData=loadData)
+		else:
+			buffer.seek(offset)
+			data = buffer.read(24)
+			inst.name = struct.unpack_from("<Q", data, 0)[0]
+			inst.type = struct.unpack_from("<Q", data, 8)[0]
+			inst.imp = struct.unpack_from("<Q", data, 16)[0]
+
+		return inst
+	
+	def asBytes(self) -> bytes:
+		data = super().asBytes()
+
+		if self.isSmall:
+			data += self.name.asBytes()
+			data += self.type.asBytes()
+			data += self.imp.asBytes()
+		else:
+			data += struct.pack("<Q", self.name)
+			data += struct.pack("<Q", self.type)
+			data += struct.pack("<Q", self.imp)
+
+		return data
+	
+	def offsetOf(self, field) -> int:
+		if field == "name":
+			return 0
+		elif field == "type":
+			return 4 if self.isSmall else 8
+		elif field == "imp":
+			return 8 if self.isSmall else 16
+
+
+class method_list_t(entsize_list_tt):
+
+	SIZE: ClassVar[int] = 8
+
+	methods: List[method_t]
+
+	_fields_ = (
+
+	)
+
+	@classmethod
+	def parse(cls, buffer: BufferedReader, fileOffset: int, vmAddr: int, loadData: bool = True) -> method_list_t:
+		inst = super().parse(buffer, fileOffset, method_t, 0xffff0003, loadData=loadData)
+
+		isSmallList = inst.isSmallList()
+		methodSize = 12 if isSmallList else 24
 		inst.methods = []
 		for i in range(0, inst.count):
-			methodOff = fileOffset + inst.SIZE + (i * method_t.SIZE)
-			inst.methods.append(method_t.parse(buffer, methodOff, loadData=loadData))
+			methodOff = fileOffset + inst.SIZE + (i * methodSize)
+			methAddr = vmAddr + inst.SIZE + (i * methodSize)
+			inst.methods.append(method_t.parse(buffer, methodOff, methAddr, isSmall=isSmallList, loadData=loadData))
+		
 		return inst
+	
+	def isSmallList(self):
+		return self.entsizeAndFlags & method_t.smallMethodListFlag
 
 
 class protocol_t(Structure):
