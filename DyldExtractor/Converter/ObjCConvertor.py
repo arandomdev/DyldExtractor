@@ -309,8 +309,9 @@ class ObjCConverter(object):
 			
 			methImpPtr = meth.imp.getP() if meth.isSmall else meth.imp
 			if methImpPtr and not self.machoFile.containsAddr(methImpPtr):
-				# surpressing this, I have no idea what theses point to.
-				logging.warning("Could not find method implementation: " + hex(methImpPtr))
+				# surpressing this, mostly caused by protocol methods,
+				# I need to find a better way to handle this.
+				# logging.warning("Could not find method implementation: " + hex(methImpPtr))
 				pass
 		
 		return methListSect, methListSectOff

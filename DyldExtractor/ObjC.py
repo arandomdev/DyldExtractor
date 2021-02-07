@@ -134,8 +134,8 @@ class method_t(Structure):
 			buffer.seek(offset)
 			data = buffer.read(24)
 			inst.name = struct.unpack_from("<Q", data, 0)[0]
-			inst.type = struct.unpack_from("<Q", data, 4)[0]
-			inst.imp = struct.unpack_from("<Q", data, 8)[0]
+			inst.type = struct.unpack_from("<Q", data, 8)[0]
+			inst.imp = struct.unpack_from("<Q", data, 16)[0]
 
 		return inst
 	
