@@ -36,8 +36,8 @@ class LinkeditConverter(object):
 		Gets export symbols
 		"""
 
-		exportData = self.machoFile.getLoadCommand((MachO.LoadCommands.LC_DYLD_INFO, MachO.LoadCommands.LC_DYLD_INFO_ONLY)).exportData
-		self.exports = MachO.TrieParser(exportData).parse()
+		dyldInfo = self.machoFile.getLoadCommand((MachO.LoadCommands.LC_DYLD_INFO, MachO.LoadCommands.LC_DYLD_INFO_ONLY))
+		self.exports = MachO.TrieParser(dyldInfo.exportData).parse() if dyldInfo else []
 
 		# remove any non ReExport symbols
 		reExportDeps = []
@@ -270,23 +270,25 @@ class RebaseConverter(object):
 		# check version
 		self.slideInfo = Dyld.dyld_cache_slide_info2.parse(self.dyldFile.file, slideInfoOffset)
 		if self.slideInfo.version == 2:
-			pass
+			self.rebaseSegmentV2(self.machoFile.getSegment(b"__DATA_CONST\x00"))
+			self.rebaseSegmentV2(self.machoFile.getSegment(b"__DATA\x00"))
+			self.rebaseSegmentV2(self.machoFile.getSegment(b"__DATA_DIRTY\x00"))
 		elif self.slideInfo.version == 3:
 			self.slideInfo = Dyld.dyld_cache_slide_info3.parse(self.dyldFile.file, slideInfoOffset)
+
+			self.rebaseSegmentV35(self.machoFile.getSegment(b"__DATA_CONST\x00"))
+			self.rebaseSegmentV35(self.machoFile.getSegment(b"__DATA\x00"))
+			self.rebaseSegmentV35(self.machoFile.getSegment(b"__DATA_DIRTY\x00"))
 		else:
 			logging.error("Unable to get slide info")
 			return
 
-		self.rebaseSegment(self.machoFile.getSegment(b"__DATA_CONST\x00"))
-		self.rebaseSegment(self.machoFile.getSegment(b"__DATA\x00"))
-		self.rebaseSegment(self.machoFile.getSegment(b"__DATA_DIRTY\x00"))
-
 		self.finalize()
 		pass
 
-	def rebaseSegment(self, segment: MachO.segment_command_64) -> None:
+	def rebaseSegmentV2(self, segment: MachO.segment_command_64) -> None:
 		"""
-			Processes the slide info for one segment.
+			Processes the slide info (V2) for one segment.
 		"""
 		
 		if not segment:
@@ -314,14 +316,45 @@ class RebaseConverter(object):
 				raise Exception("Can't handle page extras")
 			elif (page & Dyld.Slide.DYLD_CACHE_SLIDE_PAGE_ATTR_EXTRA) == 0:
 				pageOffset = (i * pageSize) + self.dyldFile.mappings[1].fileOffset
-				self.rebasePage(pageOffset, page * 4, segment)
+				self.rebasePageV2(pageOffset, page * 4, segment)
 			else:
 				raise Exception("Unknown page type")
 		pass
 
-	def rebasePage(self, pageOffset: int, firstRebaseOffset: int, segment: MachO.segment_command_64) -> None:
+	def rebaseSegmentV3(self, segment: MachO.segment_command_64) -> None:
 		"""
-			processes the rebase infomation in a page
+			Processes the slide info (V3) for one segment.
+		"""
+
+		if not segment:
+			return
+		
+		dataStart = self.dyldFile.mappings[1].address
+
+		# get the page index which contains the start and end of the segment.
+		pageSize = self.slideInfo.page_size
+		startPageAddr = segment.vmaddr - dataStart
+		startPage = int(startPageAddr / pageSize)
+		
+		endPageAddr = (((segment.vmaddr + segment.vmsize) - dataStart) + pageSize) & ~pageSize
+		endPage = int(endPageAddr / pageSize)
+
+		# process each page
+		pageStarts = struct.iter_unpack("<H", self.slideInfo.pageStartsData)
+		pageStarts = [page[0] for page in pageStarts]
+		for i in range(startPage, endPage):
+			page = pageStarts[i]
+			
+			if page == Dyld.Slide.DYLD_CACHE_SLIDE_V3_PAGE_ATTR_NO_REBASE:
+				pass
+			else:
+				pageOffset = (i * pageSize) + self.dyldFile.mappings[1].fileOffset
+				pass
+		pass
+
+	def rebasePageV2(self, pageOffset: int, firstRebaseOffset: int, segment: MachO.segment_command_64) -> None:
+		"""
+			processes the rebase infomation (V2) in a page
 
 			### parameters
 			pageOffset: int
@@ -376,6 +409,45 @@ class RebaseConverter(object):
 				self.rebaseInfo.append(MachO.Rebase.REBASE_OPCODE_DO_REBASE_IMM_TIMES | 0x1)
 			
 			rebaseOffset += delta
+	
+	def rebasePageV3(self, pageOffset: int, delta: int, segment: MachO.segment_command_64) -> None:
+		"""Process rebase info (V3) for a page.
+
+		args:
+			pageOffset: the file offset to the target page.
+			delta: the offset to the first rebase location in the page.
+			segment: the segment to rebase.
+		"""
+
+		loc = pageOffset
+		while True:
+			loc += delta
+			locInfo = Dyld.dyld_cache_slide_pointer3.parse(loc)
+
+			delta = locInfo.plain.offsetToNextPointer
+
+			# check if the segment contains the address
+			if not (loc >= segment.fileoff and loc < (segment.fileoff + segment.filesize)):
+				continue
+
+			# calculate the new value
+			newValue = None
+			if locInfo.auth.authenticated:
+				newValue = loc.auth.offsetFromSharedCacheBase + self.slideInfo.auth_value_add
+			else:
+				value51 = locInfo.plain.pointerValue
+				top8Bits = value51 & 0x0007F80000000000
+				bottom43Bits = value51 & 0x000007FFFFFFFFFF
+				newValue = ( top8Bits << 13 ) | bottom43Bits
+
+			if newValue:
+				self.slideLocation(loc, newValue, segment)
+			else:
+				logging.warning("Unable to rebase pointer at offset: " + hex(loc))
+			
+			if delta == 0:
+				break
+		pass
 
 	def slideLocation(self, fileOffset: int, value: int, segment: MachO.segment_command_64) -> None:
 		"""

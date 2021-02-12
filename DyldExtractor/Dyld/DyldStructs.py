@@ -16,7 +16,10 @@ __all__ = [
 	"dyld_cache_mapping_info",
 	"dyld_cache_slide_info2",
 	"dyld_cache_slide_info3",
-	"dyld_cache_mapping_and_slide_info"
+	"dyld_cache_mapping_and_slide_info",
+	"dyld_cache_slide_pointer3_plain",
+	"dyld_cache_slide_pointer3_auth",
+	"dyld_cache_slide_pointer3"
 ]
 
 
@@ -25,6 +28,8 @@ class Slide(IntEnum):
 	DYLD_CACHE_SLIDE_PAGE_ATTR_EXTRA = 0x8000 		# index is into extras array (not starts array)
 	DYLD_CACHE_SLIDE_PAGE_ATTR_NO_REBASE = 0x4000 	# page has no rebasing
 	DYLD_CACHE_SLIDE_PAGE_ATTR_END = 0x8000 		# last chain entry for page
+
+	DYLD_CACHE_SLIDE_V3_PAGE_ATTR_NO_REBASE = 0xFFF # page has no rebasing
 
 
 class dyld_cache_header(Structure):
@@ -275,7 +280,8 @@ class dyld_cache_slide_info3(Structure):
 	)
 
 	def loadData(self) -> None:
-		# self._buffer.seek(self._offset + self.size)
+		self._buffer.seek(self._offset + self.size)
+		self.pageStartsData = self._buffer.read(self.page_starts_count * 2)
 		pass
 
 
@@ -352,3 +358,59 @@ class dyld_cache_mapping_and_slide_info(Structure):
 		("maxProt", "<I"),
 		("initProt", "<I"),
 	)
+
+
+class dyld_cache_slide_pointer3_plain(object):
+	"""Represents a plain pointer"""
+
+	pointerValue: int
+	offsetToNextPointer: int
+	unused: int
+
+	def __init__(self, raw: int) -> None:
+		self.pointerValue = raw % 0x7FFFFFFFFFFFF
+		self.offsetToNextPointer = (raw >> 51) & 0x7FF
+		self.unused = raw >> 62
+
+
+class dyld_cache_slide_pointer3_auth(object):
+	"""Represents an authenticated pointer"""
+
+	offsetFromSharedCacheBase: int
+	diversityData: int
+	hasAddressDiversity: int
+	key: int
+	offsetToNextPointer: int
+	unused: int
+	authenticated: int 				# = 1
+
+	def __init__(self, raw) -> None:
+		self.offsetFromSharedCacheBase = raw & 0xFFFFFFFF
+		self.diversityData = (raw >> 32) & 0xFFFF
+		self.hasAddressDiversity = (raw >> 48) & 0x1
+		self.key = (raw >> 49) & 0x3
+		self.offsetToNextPointer = (raw >> 51) & 0x7FF
+		self.unused = (raw >> 62) & 0x1
+		self.authenticated = raw >> 63
+
+
+class dyld_cache_slide_pointer3(Structure):
+	"""Represents an unslid V3 rebase pointer.
+	
+	This structure is STRICTLY immutable!
+	"""
+
+	raw: int
+
+	_fields_ = (
+		("raw", "<Q"),
+	)
+
+	plain: dyld_cache_slide_pointer3_plain
+	auth: dyld_cache_slide_pointer3_auth
+
+	def loadData(self) -> None:
+		super().loadData()
+
+		self.plain = dyld_cache_slide_pointer3_plain(self.raw)
+		self.auth = dyld_cache_slide_pointer3_auth(self.raw)

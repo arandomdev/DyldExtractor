@@ -59,11 +59,11 @@ def extractImage(dyld: Dyld.DyldFile, image: Dyld.dyld_cache_image_info, outputP
 
 	# remove extra data in pointers and generate rebase data
 	logging.info("Starting RebaseConverter")
-	Converter.RebaseConverter(machoFile, dyld).convert()
+	# Converter.RebaseConverter(machoFile, dyld).convert()
 
 	# fix references to selectors
 	logging.info("Starting SelectorConverter")
-	Converter.SelectorConverter(machoFile, dyld).convert()
+	# Converter.SelectorConverter(machoFile, dyld).convert()
 
 	# fix stubs and references to stubs
 	logging.info("Starting StubConverter")
@@ -71,7 +71,7 @@ def extractImage(dyld: Dyld.DyldFile, image: Dyld.dyld_cache_image_info, outputP
 
 	# fix and decache ObjC info
 	logging.info("Starting ObjCConverter")
-	Converter.ObjCConverter(machoFile, dyld).convert()
+	# Converter.ObjCConverter(machoFile, dyld).convert()
 
 	# changes file offsets so that the final MachO file is not GBs big
 	logging.info("Starting OffsetConverter")	
