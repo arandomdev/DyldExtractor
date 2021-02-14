@@ -59,7 +59,7 @@ def extractImage(dyld: Dyld.DyldFile, image: Dyld.dyld_cache_image_info, outputP
 
 	# remove extra data in pointers and generate rebase data
 	logging.info("Starting RebaseConverter")
-	# Converter.RebaseConverter(machoFile, dyld).convert()
+	Converter.RebaseConverter(machoFile, dyld).convert()
 
 	# fix references to selectors
 	logging.info("Starting SelectorConverter")

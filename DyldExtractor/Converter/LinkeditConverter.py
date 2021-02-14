@@ -36,8 +36,19 @@ class LinkeditConverter(object):
 		Gets export symbols
 		"""
 
+		self.exports = []
+
+		# try to get exports by LC_DYLD_INFO
 		dyldInfo = self.machoFile.getLoadCommand((MachO.LoadCommands.LC_DYLD_INFO, MachO.LoadCommands.LC_DYLD_INFO_ONLY))
-		self.exports = MachO.TrieParser(dyldInfo.exportData).parse() if dyldInfo else []
+		if dyldInfo:
+			self.exports = MachO.TrieParser(dyldInfo.exportData).parse()
+		else:
+			# try to get exports by LC_DYLD_EXPORTS_TRIE
+			exportsTrie = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_DYLD_EXPORTS_TRIE)
+			if exportsTrie:
+				self.exports = MachO.TrieParser(exportsTrie.linkeditData).parse()
+			else:
+				logging.warning("Unable to get export data.")
 
 		# remove any non ReExport symbols
 		reExportDeps = []
@@ -276,9 +287,9 @@ class RebaseConverter(object):
 		elif self.slideInfo.version == 3:
 			self.slideInfo = Dyld.dyld_cache_slide_info3.parse(self.dyldFile.file, slideInfoOffset)
 
-			self.rebaseSegmentV35(self.machoFile.getSegment(b"__DATA_CONST\x00"))
-			self.rebaseSegmentV35(self.machoFile.getSegment(b"__DATA\x00"))
-			self.rebaseSegmentV35(self.machoFile.getSegment(b"__DATA_DIRTY\x00"))
+			self.rebaseSegmentV3(self.machoFile.getSegment(b"__DATA_CONST\x00"))
+			self.rebaseSegmentV3(self.machoFile.getSegment(b"__DATA\x00"))
+			self.rebaseSegmentV3(self.machoFile.getSegment(b"__DATA_DIRTY\x00"))
 		else:
 			logging.error("Unable to get slide info")
 			return

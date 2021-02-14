@@ -79,6 +79,7 @@ class Writer(object):
 			elif (
 				command.cmd == LoadCommands.LC_FUNCTION_STARTS
 				or command.cmd == LoadCommands.LC_DATA_IN_CODE
+				or command.cmd == LoadCommands.LC_DYLD_EXPORTS_TRIE
 			):
 				self.outFile.seek(command.dataoff)
 				self.outFile.write(command.linkeditData)

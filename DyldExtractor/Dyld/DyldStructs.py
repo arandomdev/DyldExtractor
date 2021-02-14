@@ -264,6 +264,9 @@ class dyld_cache_slide_info2(Structure):
 
 
 class dyld_cache_slide_info3(Structure):
+
+	SIZE: ClassVar[int] = 20
+
 	version: int 			# currently 3
 	page_size: int 			# currently 4096 (may also be 16384)
 	page_starts_count: int
@@ -280,7 +283,7 @@ class dyld_cache_slide_info3(Structure):
 	)
 
 	def loadData(self) -> None:
-		self._buffer.seek(self._offset + self.size)
+		self._buffer.seek(self._offset + self.SIZE)
 		self.pageStartsData = self._buffer.read(self.page_starts_count * 2)
 		pass
 

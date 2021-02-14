@@ -9,8 +9,8 @@ https://opensource.apple.com/source/xnu/xnu-6153.81.5/EXTERNAL_HEADERS/mach-o/lo
 https://opensource.apple.com/source/objc4/objc4-781/runtime/objc-runtime-new.h.auto.html
 
 ### DYLD Cache
-https://opensource.apple.com/source/dyld/dyld-733.6/launch-cache/dyld_cache_format.h.auto.html
-https://opensource.apple.com/source/dyld/dyld-733.6/launch-cache/dsc_extractor.cpp.auto.html
+https://opensource.apple.com/source/dyld/dyld-832.7.3/dyld3/shared-cache/dyld_cache_format.h.auto.html
+https://opensource.apple.com/source/dyld/dyld-832.7.3/dyld3/shared-cache/dsc_extractor.cpp.auto.html
 
 ### Other Extractors
 https://github.com/deepinstinct/dsc_fix/blob/master/dsc_fix.py

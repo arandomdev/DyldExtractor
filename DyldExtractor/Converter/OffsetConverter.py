@@ -100,6 +100,7 @@ class OffsetConverter(object):
 			elif (
 				command.cmd == MachO.LoadCommands.LC_FUNCTION_STARTS
 				or command.cmd == MachO.LoadCommands.LC_DATA_IN_CODE
+				or command.cmd == MachO.LoadCommands.LC_DYLD_EXPORTS_TRIE
 			):
 				command.dataoff = self.dataHead
 				self.dataHead += command.datasize
