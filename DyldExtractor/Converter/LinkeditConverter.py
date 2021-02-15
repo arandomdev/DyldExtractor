@@ -4,7 +4,7 @@ import logging
 
 from DyldExtractor import MachO
 from DyldExtractor import Dyld
-from DyldExtractor import Uleb128
+from DyldExtractor import Structure
 
 class LinkeditConverter(object):
 	"""Rebuilds the linkedit.
@@ -251,13 +251,27 @@ class RebaseConverter(object):
 		self.machoFile = machoFile
 		self.dyldFile = dyldFile
 
-		self.rebaseInfo = bytearray()
-		self.rebaseInfo.append(MachO.Rebase.REBASE_OPCODE_SET_TYPE_IMM | MachO.Rebase.REBASE_TYPE_POINTER)
-	
 	def convert(self) -> None:
 		"""
 			Starts the conversion.
 		"""
+
+		# get a list of all the slide info and mappings
+		self.slideMappingPairs = []
+		if self.dyldFile.header.slideInfoOffset:
+			# assume that the slide info coresponds to the second mapping
+			slideInfo = self.getSlideInfo(self.dyldFile.header.slideInfoOffset)
+			mapping = self.dyldFile.mappings[1]
+
+			self.slideMappingPairs.append((slideInfo, mapping))
+		else:
+			# see if it uses mappingWithSideOffset
+			if not self.dyldFile.header.containsField("mappingWithSlideOffset"):
+				logging.error("Unable to get slide info")
+				return
+			
+
+
 
 		# get the slide info
 		slideInfoOffset = 0
@@ -294,7 +308,18 @@ class RebaseConverter(object):
 			logging.error("Unable to get slide info")
 			return
 
-		self.finalize()
+		pass
+
+	def getSlideInfo(self, slideInfoOffset: int) -> Structure:
+		self.dyldFile.file.seek(slideInfoOffset)
+		slideInfoVersion = struct.unpack("<I", self.dyldFile.file.read(4))[0]
+
+		if slideInfoVersion == 2:
+			return Dyld.dyld_cache_slide_info2.parse(self.dyldFile.file, slideInfoOffset)
+		elif slideInfoVersion == 3:
+			return Dyld.dyld_cache_slide_info3.parse(self.dyldFile.file, slideInfoOffset)
+		else:
+			raise Exception(f"Unknown slide info version: {slideInfoVersion}")
 		pass
 
 	def rebaseSegmentV2(self, segment: MachO.segment_command_64) -> None:
@@ -413,11 +438,6 @@ class RebaseConverter(object):
 			# if the location is within the segment, adjust the data
 			if realLoc >= segment.fileoff and realLoc < (segment.fileoff + segment.filesize):
 				self.slideLocation(realLoc, value, segment)
-
-				# add a rebase entry
-				self.rebaseInfo.append(MachO.Rebase.REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | segmentIndex)
-				self.rebaseInfo += Uleb128.encodeUleb128(realLoc - segment.fileoff)
-				self.rebaseInfo.append(MachO.Rebase.REBASE_OPCODE_DO_REBASE_IMM_TIMES | 0x1)
 			
 			rebaseOffset += delta
 	
@@ -482,14 +502,3 @@ class RebaseConverter(object):
 		sectionData += struct.pack("<Q", value)
 		sectionData += containingSect.sectionData[sectionOff+8:]
 		containingSect.sectionData = sectionData
-	
-	def finalize(self) -> None:
-		"""
-			Finalizes the rebase info, and sets the data in the macho file.
-		"""
-
-		self.rebaseInfo.append(MachO.Rebase.REBASE_OPCODE_DONE)
-		
-		dyldCommand = self.machoFile.getLoadCommand((MachO.LoadCommands.LC_DYLD_INFO, MachO.LoadCommands.LC_DYLD_INFO_ONLY))
-		dyldCommand.rebaseData = bytes(self.rebaseInfo)
-		dyldCommand.rebase_size = len(self.rebaseInfo)
