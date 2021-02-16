@@ -264,12 +264,9 @@ class RebaseConverter(object):
 			mapping = self.dyldFile.mappings[1]
 
 			self.slideMappingPairs.append((slideInfo, mapping))
-		else:
-			# see if it uses mappingWithSideOffset
-			if not self.dyldFile.header.containsField("mappingWithSlideOffset"):
-				logging.error("Unable to get slide info")
-				return
-
+		
+		# see if it uses mappingWithSideOffset
+		if self.dyldFile.header.containsField("mappingWithSlideOffset"):
 			for i in range(0, self.dyldFile.header.mappingWithSlideCount):
 				offset = self.dyldFile.header.mappingWithSlideOffset + (i*Dyld.dyld_cache_mapping_and_slide_info.SIZE)
 				mapping = Dyld.dyld_cache_mapping_and_slide_info.parse(self.dyldFile.file, offset)
@@ -279,7 +276,10 @@ class RebaseConverter(object):
 					slideInfo = self.getSlideInfo(mapping.slideInfoFileOffset)
 				
 				self.slideMappingPairs.append((slideInfo, mapping))
-			
+
+		if len(self.slideMappingPairs) == 0:
+			logging.error("Unable to get slide info")
+			return
 
 
 
