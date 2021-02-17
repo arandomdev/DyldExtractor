@@ -30,7 +30,8 @@ __all__ = [
 	"nlist_64",
 	"sub_framework_command",
 	"sub_client_command",
-	"routines_command_64"
+	"routines_command_64",
+	"version_min_command"
 ]
 
 
@@ -560,7 +561,7 @@ class rpath_command(load_command):
 
 class nlist_64(Structure):
 
-	SIZE: typing.ClassVar[int] = 16
+	SIZE: ClassVar[int] = 16
 	
 	n_strx: int 	# index into the string table
 	n_type: int 	# type flag, see below
@@ -641,4 +642,22 @@ class routines_command_64(load_command):
 		("reserved4", "<Q"),
 		("reserved5", "<Q"),
 		("reserved6", "<Q"),
+	)
+
+
+class version_min_command(load_command):
+
+	cmd: int 		# LC_VERSION_MIN_MACOSX or
+					# LC_VERSION_MIN_IPHONEOS or
+					# LC_VERSION_MIN_WATCHOS or
+					# LC_VERSION_MIN_TVOS
+	cmdsize: int 	# sizeof(struct min_version_command) */
+	version: int 	# X.Y.Z is encoded in nibbles xxxx.yy.zz */
+	sdk: int 		# X.Y.Z is encoded in nibbles xxxx.yy.zz */
+
+	_fields_ = (
+		("cmd", "<I"),
+		("cmdsize", "<I"),
+		("version", "<I"),
+		("sdk", "<I"),
 	)

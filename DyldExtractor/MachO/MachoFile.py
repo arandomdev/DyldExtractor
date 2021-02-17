@@ -63,6 +63,8 @@ class MachoFile(object):
 				command = sub_client_command
 			elif cmd == LoadCommands.LC_ROUTINES_64:
 				command = routines_command_64
+			elif cmd == LoadCommands.LC_VERSION_MIN_MACOSX or cmd == LoadCommands.LC_VERSION_MIN_IPHONEOS or cmd == LoadCommands.LC_VERSION_MIN_WATCHOS or cmd == LoadCommands.LC_VERSION_MIN_TVOS:
+				command = version_min_command
 			else:
 				raise Exception("Unknown Loadcommand: " + LoadCommands(cmd).name)
 

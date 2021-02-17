@@ -127,6 +127,10 @@ class OffsetConverter(object):
 				or command.cmd == MachO.LoadCommands.LC_ROUTINES_64
 				or command.cmd == MachO.LoadCommands.LC_ENCRYPTION_INFO_64
 				or command.cmd == MachO.LoadCommands.LC_RPATH
+				or command.cmd == MachO.LoadCommands.LC_VERSION_MIN_MACOSX
+				or command.cmd == MachO.LoadCommands.LC_VERSION_MIN_IPHONEOS
+				or command.cmd == MachO.LoadCommands.LC_VERSION_MIN_WATCHOS
+				or command.cmd == MachO.LoadCommands.LC_VERSION_MIN_TVOS
 			):
 				# These don't have any data
 				pass

@@ -126,6 +126,10 @@ class Writer(object):
 				or command.cmd == LoadCommands.LC_ROUTINES_64
 				or command.cmd == LoadCommands.LC_ENCRYPTION_INFO_64
 				or command.cmd == LoadCommands.LC_RPATH
+				or command.cmd == LoadCommands.LC_VERSION_MIN_MACOSX
+				or command.cmd == LoadCommands.LC_VERSION_MIN_IPHONEOS
+				or command.cmd == LoadCommands.LC_VERSION_MIN_WATCHOS
+				or command.cmd == LoadCommands.LC_VERSION_MIN_TVOS
 			):
 				pass
 
