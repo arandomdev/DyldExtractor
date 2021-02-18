@@ -4,7 +4,7 @@ import logging
 
 from DyldExtractor import MachO
 from DyldExtractor import Dyld
-from DyldExtractor import Uleb128
+from DyldExtractor import Structure
 
 class LinkeditConverter(object):
 	"""Rebuilds the linkedit.
@@ -36,8 +36,19 @@ class LinkeditConverter(object):
 		Gets export symbols
 		"""
 
-		exportData = self.machoFile.getLoadCommand((MachO.LoadCommands.LC_DYLD_INFO, MachO.LoadCommands.LC_DYLD_INFO_ONLY)).exportData
-		self.exports = MachO.TrieParser(exportData).parse()
+		self.exports = []
+
+		# try to get exports by LC_DYLD_INFO
+		dyldInfo = self.machoFile.getLoadCommand((MachO.LoadCommands.LC_DYLD_INFO, MachO.LoadCommands.LC_DYLD_INFO_ONLY))
+		if dyldInfo:
+			self.exports = MachO.TrieParser(dyldInfo.exportData).parse()
+		else:
+			# try to get exports by LC_DYLD_EXPORTS_TRIE
+			exportsTrie = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_DYLD_EXPORTS_TRIE)
+			if exportsTrie:
+				self.exports = MachO.TrieParser(exportsTrie.linkeditData).parse()
+			else:
+				logging.warning("Unable to get export data.")
 
 		# remove any non ReExport symbols
 		reExportDeps = []
@@ -229,6 +240,27 @@ class LinkeditConverter(object):
 		pass
 
 
+class MappingInfo(object):
+
+	def __init__(self, mappingInfo, slideInfo) -> None:
+		"""
+			A storage class for mappings, slide info, and version data
+		"""
+		super().__init__()
+
+		self.mapping = mappingInfo
+		self.slideInfo = slideInfo
+		
+	def containsAddr(self, addr: int) -> bool:
+		"""Check if the address is contained in the mapping info."""
+
+		mappingHighAddr = self.mapping.address + self.mapping.size
+		if (addr >= self.mapping.address) and (addr < mappingHighAddr):
+			return True
+		else:
+			return False
+
+
 class RebaseConverter(object):
 	
 	"""
@@ -240,64 +272,85 @@ class RebaseConverter(object):
 		self.machoFile = machoFile
 		self.dyldFile = dyldFile
 
-		self.rebaseInfo = bytearray()
-		self.rebaseInfo.append(MachO.Rebase.REBASE_OPCODE_SET_TYPE_IMM | MachO.Rebase.REBASE_TYPE_POINTER)
-	
 	def convert(self) -> None:
 		"""
 			Starts the conversion.
 		"""
 
-		# get the slide info
-		slideInfoOffset = 0
+		# get a list of all the slide info and mappings
+		mappingInfoList = []
 		if self.dyldFile.header.slideInfoOffset:
-			slideInfoOffset = self.dyldFile.header.slideInfoOffset
-		else:
-			if not self.dyldFile.header.containsField("mappingWithSlideOffset"):
-				logging.error("Unable to get slide info")
-				return
+			# assume that only the second mapping has slide info
+			mappingInfoList.append(MappingInfo(self.dyldFile.mappings[0], None))
 
-			# get the second mapping info
-			mappingOff = self.dyldFile.header.mappingWithSlideOffset + Dyld.dyld_cache_mapping_and_slide_info.SIZE
-			mappingInfo = Dyld.dyld_cache_mapping_and_slide_info.parse(self.dyldFile.file, mappingOff)
-			
-			if not mappingInfo.slideInfoFileOffset:
-				logging.error("Unable to get slide info")
-				return
-			
-			slideInfoOffset = mappingInfo.slideInfoFileOffset
+			slideInfo = self.getSlideInfo(self.dyldFile.header.slideInfoOffset)
+			mapping = self.dyldFile.mappings[1]
+			mappingInfoList.append(MappingInfo(mapping, slideInfo))
+
+			# add the rest of the mappings
+			[mappingInfoList.append(MappingInfo(mapping, None)) for mapping in self.dyldFile.mappings[2:]]
+
 		
-		# check version
-		self.slideInfo = Dyld.dyld_cache_slide_info2.parse(self.dyldFile.file, slideInfoOffset)
-		if self.slideInfo.version == 2:
-			pass
-		elif self.slideInfo.version == 3:
-			self.slideInfo = Dyld.dyld_cache_slide_info3.parse(self.dyldFile.file, slideInfoOffset)
-			logging.error("Slide info version 3 is not supported")
-			return
-		else:
+		# see if it uses mappingWithSideOffset
+		if self.dyldFile.header.containsField("mappingWithSlideOffset"):
+			for i in range(0, self.dyldFile.header.mappingWithSlideCount):
+				offset = self.dyldFile.header.mappingWithSlideOffset + (i*Dyld.dyld_cache_mapping_and_slide_info.SIZE)
+				mapping = Dyld.dyld_cache_mapping_and_slide_info.parse(self.dyldFile.file, offset)
+				
+				slideInfo = None
+				if mapping.slideInfoFileSize:
+					slideInfo = self.getSlideInfo(mapping.slideInfoFileOffset)
+				
+				mappingInfoList.append(MappingInfo(mapping, slideInfo))
+
+		if len(mappingInfoList) == 0:
 			logging.error("Unable to get slide info")
 			return
 
-		self.rebaseSegment(self.machoFile.getSegment(b"__DATA_CONST\x00"))
-		self.rebaseSegment(self.machoFile.getSegment(b"__DATA\x00"))
-		self.rebaseSegment(self.machoFile.getSegment(b"__DATA_DIRTY\x00"))
+		# Rebase all the segments
+		segments = self.machoFile.getLoadCommand(MachO.LoadCommands.LC_SEGMENT_64, multiple=True)
+		for seg in segments:
+			mappingInfo = next((info for info in mappingInfoList if info.containsAddr(seg.vmaddr)), None)
+			
+			if not mappingInfo:
+				logging.warning(f"Unable to get mapping info for segment: {seg.segname}")
+				continue
 
-		self.finalize()
+			if not mappingInfo.slideInfo:
+				# There is no slide info for this mapping
+				continue
+
+			if mappingInfo.slideInfo.version == 2:
+				self.rebaseSegmentV2(seg, mappingInfo)
+			elif mappingInfo.slideInfo.version == 3:
+				self.rebaseSegmentV3(seg, mappingInfo)
+				pass
 		pass
 
-	def rebaseSegment(self, segment: MachO.segment_command_64) -> None:
+	def getSlideInfo(self, slideInfoOffset: int) -> Structure:
+		self.dyldFile.file.seek(slideInfoOffset)
+		slideInfoVersion = struct.unpack("<I", self.dyldFile.file.read(4))[0]
+
+		if slideInfoVersion == 2:
+			return Dyld.dyld_cache_slide_info2.parse(self.dyldFile.file, slideInfoOffset)
+		elif slideInfoVersion == 3:
+			return Dyld.dyld_cache_slide_info3.parse(self.dyldFile.file, slideInfoOffset)
+		else:
+			raise Exception(f"Unknown slide info version: {slideInfoVersion}")
+		pass
+
+	def rebaseSegmentV2(self, segment: MachO.segment_command_64, mappingInfo: MappingInfo) -> None:
 		"""
-			Processes the slide info for one segment.
+			Processes the slide info (V2) for one segment.
 		"""
 		
 		if not segment:
 			return
 		
-		dataStart = self.dyldFile.mappings[1].address
+		dataStart = mappingInfo.mapping.address
 
 		# get the page index which contains the start and end of the segment.
-		pageSize = self.slideInfo.page_size
+		pageSize = mappingInfo.slideInfo.page_size
 		startPageAddr = segment.vmaddr - dataStart
 		startPage = int(startPageAddr / pageSize)
 		
@@ -305,7 +358,7 @@ class RebaseConverter(object):
 		endPage = int(endPageAddr / pageSize)
 
 		# process each page
-		pageStarts = struct.iter_unpack("<H", self.slideInfo.pageStartsData)
+		pageStarts = struct.iter_unpack("<H", mappingInfo.slideInfo.pageStartsData)
 		pageStarts = [page[0] for page in pageStarts]
 		for i in range(startPage, endPage):
 			page = pageStarts[i]
@@ -315,15 +368,47 @@ class RebaseConverter(object):
 			elif page & Dyld.Slide.DYLD_CACHE_SLIDE_PAGE_ATTR_EXTRA:
 				raise Exception("Can't handle page extras")
 			elif (page & Dyld.Slide.DYLD_CACHE_SLIDE_PAGE_ATTR_EXTRA) == 0:
-				pageOffset = (i * pageSize) + self.dyldFile.mappings[1].fileOffset
-				self.rebasePage(pageOffset, page * 4, segment)
+				pageOffset = (i * pageSize) + mappingInfo.mapping.fileOffset
+				self.rebasePageV2(pageOffset, page * 4, segment, mappingInfo.slideInfo)
 			else:
 				raise Exception("Unknown page type")
 		pass
 
-	def rebasePage(self, pageOffset: int, firstRebaseOffset: int, segment: MachO.segment_command_64) -> None:
+	def rebaseSegmentV3(self, segment: MachO.segment_command_64, mappingInfo: MappingInfo) -> None:
 		"""
-			processes the rebase infomation in a page
+			Processes the slide info (V3) for one segment.
+		"""
+
+		if not segment:
+			return
+		
+		dataStart = mappingInfo.mapping.address
+
+		# get the page index which contains the start and end of the segment.
+		pageSize = mappingInfo.slideInfo.page_size
+		startPageAddr = segment.vmaddr - dataStart
+		startPage = int(startPageAddr / pageSize)
+		
+		endPageAddr = (((segment.vmaddr + segment.vmsize) - dataStart) + pageSize) & ~pageSize
+		endPage = int(endPageAddr / pageSize)
+
+		# process each page
+		pageStarts = struct.iter_unpack("<H", mappingInfo.slideInfo.pageStartsData)
+		pageStarts = [page[0] for page in pageStarts]
+		for i in range(startPage, endPage):
+			page = pageStarts[i]
+			
+			if page == Dyld.Slide.DYLD_CACHE_SLIDE_V3_PAGE_ATTR_NO_REBASE:
+				pass
+			else:
+				pageOffset = (i * pageSize) + mappingInfo.mapping.fileOffset
+				self.rebasePageV3(pageOffset, page, segment, mappingInfo.slideInfo)
+				pass
+		pass
+
+	def rebasePageV2(self, pageOffset: int, firstRebaseOffset: int, segment: MachO.segment_command_64, slideInfo: Dyld.dyld_cache_slide_info2) -> None:
+		"""
+			processes the rebase infomation (V2) in a page
 
 			### parameters
 			pageOffset: int
@@ -341,11 +426,9 @@ class RebaseConverter(object):
 			
 		"""
 
-		segmentIndex = self.machoFile.loadCommands.index(segment)
-		
-		deltaMask = self.slideInfo.delta_mask
+		deltaMask = slideInfo.delta_mask
 		valueMask = ~deltaMask
-		valueAdd = self.slideInfo.value_add
+		valueAdd = slideInfo.value_add
 
 		# basically __builtin_ctzll(deltaMask) - 2;
 		deltaShift = "{0:b}".format(deltaMask)
@@ -371,13 +454,47 @@ class RebaseConverter(object):
 			# if the location is within the segment, adjust the data
 			if realLoc >= segment.fileoff and realLoc < (segment.fileoff + segment.filesize):
 				self.slideLocation(realLoc, value, segment)
-
-				# add a rebase entry
-				self.rebaseInfo.append(MachO.Rebase.REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | segmentIndex)
-				self.rebaseInfo += Uleb128.encodeUleb128(realLoc - segment.fileoff)
-				self.rebaseInfo.append(MachO.Rebase.REBASE_OPCODE_DO_REBASE_IMM_TIMES | 0x1)
 			
 			rebaseOffset += delta
+	
+	def rebasePageV3(self, pageOffset: int, delta: int, segment: MachO.segment_command_64, slideInfo: Dyld.dyld_cache_slide_info3) -> None:
+		"""Process rebase info (V3) for a page.
+
+		args:
+			pageOffset: the file offset to the target page.
+			delta: the offset to the first rebase location in the page.
+			segment: the segment to rebase.
+		"""
+
+		loc = pageOffset
+		while True:
+			loc += delta
+			locInfo = Dyld.dyld_cache_slide_pointer3.parse(self.dyldFile.file, loc)
+
+			delta = locInfo.plain.offsetToNextPointer
+
+			# check if the segment contains the address
+			if not (loc >= segment.fileoff and loc < (segment.fileoff + segment.filesize)):
+				if delta == 0:
+					break
+
+				continue
+
+			# calculate the new value
+			newValue = None
+			if locInfo.auth.authenticated:
+				newValue = locInfo.auth.offsetFromSharedCacheBase + slideInfo.auth_value_add
+			else:
+				value51 = locInfo.plain.pointerValue
+				top8Bits = value51 & 0x0007F80000000000
+				bottom43Bits = value51 & 0x000007FFFFFFFFFF
+				newValue = ( top8Bits << 13 ) | bottom43Bits
+
+			self.slideLocation(loc, newValue, segment)
+			
+			if delta == 0:
+				break
+		pass
 
 	def slideLocation(self, fileOffset: int, value: int, segment: MachO.segment_command_64) -> None:
 		"""
@@ -401,14 +518,3 @@ class RebaseConverter(object):
 		sectionData += struct.pack("<Q", value)
 		sectionData += containingSect.sectionData[sectionOff+8:]
 		containingSect.sectionData = sectionData
-	
-	def finalize(self) -> None:
-		"""
-			Finalizes the rebase info, and sets the data in the macho file.
-		"""
-
-		self.rebaseInfo.append(MachO.Rebase.REBASE_OPCODE_DONE)
-		
-		dyldCommand = self.machoFile.getLoadCommand((MachO.LoadCommands.LC_DYLD_INFO, MachO.LoadCommands.LC_DYLD_INFO_ONLY))
-		dyldCommand.rebaseData = bytes(self.rebaseInfo)
-		dyldCommand.rebase_size = len(self.rebaseInfo)

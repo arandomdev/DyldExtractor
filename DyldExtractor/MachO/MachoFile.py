@@ -4,6 +4,7 @@ import struct
 import copy
 
 from typing import List, Union, Tuple
+from io import BufferedReader
 
 from DyldExtractor.MachO.MachoStructs import *
 
