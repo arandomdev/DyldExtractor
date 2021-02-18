@@ -171,7 +171,7 @@ class dyld_cache_header(Structure):
 		if fieldIndex == -1:
 			return False
 
-		if self.cutoffPoint -1:
+		if self.cutoffPoint == -1:
 			return True
 		
 		if fieldIndex >= self.cutoffPoint:
