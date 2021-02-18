@@ -63,7 +63,7 @@ def extractImage(dyld: Dyld.DyldFile, image: Dyld.dyld_cache_image_info, outputP
 
 	# fix references to selectors
 	logging.info("Starting SelectorConverter")
-	# Converter.SelectorConverter(machoFile, dyld).convert()
+	Converter.SelectorConverter(machoFile, dyld).convert()
 
 	# fix stubs and references to stubs
 	logging.info("Starting StubConverter")

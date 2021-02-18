@@ -492,10 +492,7 @@ class RebaseConverter(object):
 				bottom43Bits = value51 & 0x000007FFFFFFFFFF
 				newValue = ( top8Bits << 13 ) | bottom43Bits
 
-			if newValue:
-				self.slideLocation(loc, newValue, segment)
-			else:
-				logging.warning("Unable to rebase pointer at offset: " + hex(loc))
+			self.slideLocation(loc, newValue, segment)
 			
 			if delta == 0:
 				break
