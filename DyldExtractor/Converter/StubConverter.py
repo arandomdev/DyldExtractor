@@ -276,7 +276,13 @@ class StubConverter(object):
 			if nextAddr == -1:
 				# check if we hit a function
 				image = next(image for image in self.imageCache if image.containsAddr(currentAddr))
-				sect = image.segmentForAddr(currentAddr)[1]
+				
+				# null guard.
+				sect = image.segmentForAddr(currentAddr)
+				if not sect:
+					return -1
+				else:
+					sect = sect[1]
 
 				if (
 					b"__la_resolver\x00" in sect.sectname
