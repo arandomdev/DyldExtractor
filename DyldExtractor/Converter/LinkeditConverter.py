@@ -471,7 +471,7 @@ class RebaseConverter(object):
 			loc += delta
 			locInfo = Dyld.dyld_cache_slide_pointer3.parse(self.dyldFile.file, loc)
 
-			delta = locInfo.plain.offsetToNextPointer
+			delta = locInfo.plain.offsetToNextPointer * 8
 
 			# check if the segment contains the address
 			if not (loc >= segment.fileoff and loc < (segment.fileoff + segment.filesize)):
