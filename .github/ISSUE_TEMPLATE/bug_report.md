@@ -12,7 +12,7 @@ A clear and concise description of what the bug is. Include the error message to
 
 **To Reproduce**
 1. iOS version
-2. DYLD target device and identifier, i.e iPhone X 11,2
+2. DYLD target device and identifier. Can be found on [ipsw.me](https://ipsw.me/), for example iPhone X 11,2.
 3. Terminal command to reproduce.
 
 **Additional context**
