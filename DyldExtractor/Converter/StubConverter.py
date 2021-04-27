@@ -168,6 +168,9 @@ class StubConverter(object):
 		"""
 		
 		stubFileOff = self.dyldFile.convertAddr(stubAddr)
+		if stubFileOff == -1:
+			return -1
+
 		self.dyldFile.file.seek(stubFileOff)
 		stubData = self.dyldFile.file.read(0xc) # the size of a stub
 
@@ -275,7 +278,9 @@ class StubConverter(object):
 
 			if nextAddr == -1:
 				# check if we hit a function
-				image = next(image for image in self.imageCache if image.containsAddr(currentAddr))
+				image = next((image for image in self.imageCache if image.containsAddr(currentAddr)), None)
+				if image is None:
+					return -1
 				
 				# null guard.
 				sect = image.segmentForAddr(currentAddr)
