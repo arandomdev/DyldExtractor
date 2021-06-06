@@ -389,7 +389,7 @@ class RebaseConverter(object):
 		startPageAddr = segment.vmaddr - dataStart
 		startPage = int(startPageAddr / pageSize)
 		
-		endPageAddr = (((segment.vmaddr + segment.vmsize) - dataStart) + pageSize) & ~pageSize
+		endPageAddr = ((segment.vmaddr + segment.vmsize) - dataStart) + pageSize
 		endPage = int(endPageAddr / pageSize)
 
 		# process each page
