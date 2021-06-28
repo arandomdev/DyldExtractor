@@ -1,0 +1,5 @@
+__pycache__
+.vscode/
+
+# Big files like the shared cache should be excluded from the repo
+binaries/
