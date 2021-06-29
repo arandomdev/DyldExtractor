@@ -17,6 +17,7 @@ try:
 	progressbar.streams 
 except AttributeError:
 	print("progressbar is installed but progressbar2 required.")
+	exit(1)
 	
 from DyldExtractor.extraction_context import ExtractionContext
 
