@@ -4,8 +4,21 @@ import pathlib
 import logging
 import mmap
 import os
+import sys
 from io import BufferedReader
 
+try:
+	assert sys.version_info >= (3, 9, 5)
+except AssertionError:
+	print("Python 3.9.5 or greater is required", file=sys.stderr)
+	exit(1)
+
+try:
+	progressbar.streams 
+except AttributeError:
+	print("progressbar is installed but progressbar2 required.")
+	exit(1)
+	
 from DyldExtractor.extraction_context import ExtractionContext
 
 from DyldExtractor.dyld.dyld_context import DyldContext
