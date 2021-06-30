@@ -1,8 +1,9 @@
 import argparse
 import mmap
-from os import path
 import pathlib
 import sys
+import multiprocessing
+import signal
 
 import progressbar
 
@@ -25,12 +26,7 @@ except AttributeError:
 class _DyldExtractorArgs(argparse.Namespace):
 
 	dyld_path: pathlib.Path
-	extract: str
 	output: pathlib.Path
-
-	list_frameworks: bool
-	filter: str
-
 	verbosity: int
 	pass
 
@@ -58,22 +54,113 @@ def _createArgParser() -> argparse.ArgumentParser:
 	return parser
 
 
+def _workerInitializer():
+	"""
+	Ignore KeyboardInterrupt in workers so that the main process
+	can receive it and stop everything.
+	"""
+	signal.signal(signal.SIGINT, signal.SIG_IGN)
+	pass
+
+
+def _extractImage(
+	dyldPath: pathlib.Path,
+	outputDir: pathlib.Path,
+	imageIndex: int,
+	imagePath: str
+) -> str:
+	# convert imagePath to a relative path
+	if imagePath[0] == "/":
+		imagePath = imagePath[1:]
+		pass
+
+	outputPath = outputDir / imagePath
+	print(outputPath)
+	pass
+
+
 def _main() -> None:
 	argParser = _createArgParser()
 	args = argParser.parse_args(namespace=_DyldExtractorArgs())
 
-	print(args)
+	# Make the output dir
+	if args.output is None:
+		outputDir = pathlib.Path("binaries")
+		pass
+	else:
+		outputDir = pathlib.Path(args.output)
+		pass
+
+	outputDir.mkdir(parents=True, exist_ok=True)
 
 	# create a list of image paths
-	imagesPaths: pathlib.Path = []
+	imagePaths: list[str] = []
 	with open(args.dyld_path, "rb") as f:
 		dyldFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
 		dyldCtx = DyldContext(dyldFile)
 
 		for image in dyldCtx.images:
 			imagePath = dyldCtx.readString(image.pathFileOffset)[0:-1].decode("utf-8")
-			print(imagePath)
+			imagePaths.append(imagePath)
+			break
 			pass
+		pass
+
+	with multiprocessing.Pool(initializer=_workerInitializer) as pool:
+		# Create a job for each image
+		jobs: list[tuple[str, multiprocessing.pool.AsyncResult]] = []
+		for i, imagePath in enumerate(imagePaths):
+			# The index should correspond with its index in the DSC
+			jobs.append(
+				(
+					imagePath,
+					pool.apply_async(_extractImage, (args.dyld_path, outputDir, i, imagePath))
+				)
+			)
+
+			# setup a progress bar
+			jobsComplete = 0
+			progressBar = progressbar.ProgressBar(
+				max_value=len(jobs),
+				redirect_stdout=True
+			)
+			pass
+
+		# Record potential logging output for each job
+		jobOutputs: list[str] = []
+
+		# wait for all jobs
+		while len(jobs):
+			for i in reversed(range(len(jobs))):
+				imagePath, job = jobs[i]
+				if job.ready():
+					jobs.pop(i)
+
+					jobsComplete += 1
+					progressBar.update(jobsComplete)
+
+					imageName = imagePath.split("/")[-1]
+					print(f"Processed: {imageName}")
+
+					jobOutput = job.get()
+					if jobOutput:
+						summary = f"----- {imageName} -----\n{jobOutput}--------------------\n"
+						jobOutputs.append(summary)
+						print(summary)
+						pass
+					pass
+				pass
+			pass
+
+		# close the pool and cleanup
+		pool.close()
+		pool.join()
+		progressBar.update(jobsComplete)
+
+		# reprint any job output
+		print("\n\n----- Summary -----")
+		print("".join(jobOutputs))
+		print("-------------------\n\n")
 		pass
 	pass
 
