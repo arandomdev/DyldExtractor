@@ -14,11 +14,11 @@ except AssertionError:
 	exit(1)
 
 try:
-	progressbar.streams 
+	progressbar.streams
 except AttributeError:
-	print("progressbar is installed but progressbar2 required.")
+	print("progressbar is installed but progressbar2 required.", file=sys.stderr)
 	exit(1)
-	
+
 from DyldExtractor.extraction_context import ExtractionContext
 
 from DyldExtractor.dyld.dyld_context import DyldContext
