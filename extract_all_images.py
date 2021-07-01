@@ -1,13 +1,24 @@
 import argparse
+import io
+import logging
 import mmap
-import pathlib
-import sys
 import multiprocessing
+import pathlib
 import signal
+import sys
 
 import progressbar
 
+from DyldExtractor.converter import (
+	linkedit_optimizer,
+	macho_offset,
+	objc_fixer,
+	slide_info,
+	stub_fixer
+)
 from DyldExtractor.dyld.dyld_context import DyldContext
+from DyldExtractor.extraction_context import ExtractionContext
+from DyldExtractor.macho.macho_context import MachOContext
 
 # check dependencies
 try:
@@ -54,6 +65,12 @@ def _createArgParser() -> argparse.ArgumentParser:
 	return parser
 
 
+class _DummyProgressBar():
+	def update(*args, **kwargs):
+		pass
+	pass
+
+
 def _workerInitializer():
 	"""
 	Ignore KeyboardInterrupt in workers so that the main process
@@ -67,16 +84,77 @@ def _extractImage(
 	dyldPath: pathlib.Path,
 	outputDir: pathlib.Path,
 	imageIndex: int,
-	imagePath: str
+	imagePath: str,
+	loggingLevel: int
 ) -> str:
-	# convert imagePath to a relative path
+	# change imagePath to a relative path
 	if imagePath[0] == "/":
 		imagePath = imagePath[1:]
 		pass
 
 	outputPath = outputDir / imagePath
-	print(outputPath)
-	pass
+
+	# setup logging
+	logger = logging.getLogger(f"Worker: {outputPath}")
+
+	loggingStream = io.StringIO()
+	handler = logging.StreamHandler(loggingStream)
+	formatter = logging.Formatter(
+		fmt="{asctime}:{msecs:03.0f} [{levelname:^9}] {filename}:{lineno:d} : {message}",  # noqa
+		datefmt="%H:%M:%S",
+		style="{",
+	)
+
+	handler.setFormatter(formatter)
+	logger.addHandler(handler)
+	logger.setLevel(loggingLevel)
+
+	# Process the image
+	with open(dyldPath, "rb") as f:
+		dyldFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+		dyldCtx = DyldContext(dyldFile)
+		imageOffset = dyldCtx.convertAddr(dyldCtx.images[imageIndex].address)
+
+		machoFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_COPY)
+		machoCtx = MachOContext(machoFile, imageOffset)
+
+		extractionCtx = ExtractionContext(
+			dyldCtx,
+			machoCtx,
+			_DummyProgressBar(),
+			logger
+		)
+
+		try:
+			slide_info.processSlideInfo(extractionCtx)
+			linkedit_optimizer.optimizeLinkedit(extractionCtx)
+			stub_fixer.fixStubs(extractionCtx)
+			objc_fixer.fixObjC(extractionCtx)
+			macho_offset.optimizeOffsets(extractionCtx)
+
+			# write the file
+			outputPath.parent.mkdir(parents=True, exist_ok=True)
+			with open(outputPath, "wb+") as outFile:
+				newMachoCtx = extractionCtx.machoCtx
+
+				# get the size of the new file
+				linkeditSeg = newMachoCtx.segments[b"__LINKEDIT"].seg
+				fileSize = linkeditSeg.fileoff + linkeditSeg.filesize
+
+				newMachoCtx.file.seek(0)
+				outFile.write(newMachoCtx.file.read(fileSize))
+				pass
+			pass
+		except Exception as e:
+			logger.exception(e)
+			pass
+		pass
+
+	handler.close()
+	loggingStream.flush()
+	loggingOutput = loggingStream.getvalue()
+	loggingStream.close()
+	return loggingOutput
 
 
 def _main() -> None:
@@ -93,6 +171,16 @@ def _main() -> None:
 
 	outputDir.mkdir(parents=True, exist_ok=True)
 
+	if args.verbosity == 0:
+		# Set the log level so high that it doesn't do anything
+		loggingLevel = 100
+	elif args.verbosity == 1:
+		loggingLevel = logging.WARNING
+	elif args.verbosity == 2:
+		loggingLevel = logging.INFO
+	elif args.verbosity == 3:
+		loggingLevel = logging.DEBUG
+
 	# create a list of image paths
 	imagePaths: list[str] = []
 	with open(args.dyld_path, "rb") as f:
@@ -102,29 +190,24 @@ def _main() -> None:
 		for image in dyldCtx.images:
 			imagePath = dyldCtx.readString(image.pathFileOffset)[0:-1].decode("utf-8")
 			imagePaths.append(imagePath)
-			break
 			pass
 		pass
 
 	with multiprocessing.Pool(initializer=_workerInitializer) as pool:
 		# Create a job for each image
 		jobs: list[tuple[str, multiprocessing.pool.AsyncResult]] = []
+		jobsComplete = 0
 		for i, imagePath in enumerate(imagePaths):
 			# The index should correspond with its index in the DSC
-			jobs.append(
-				(
-					imagePath,
-					pool.apply_async(_extractImage, (args.dyld_path, outputDir, i, imagePath))
-				)
-			)
-
-			# setup a progress bar
-			jobsComplete = 0
-			progressBar = progressbar.ProgressBar(
-				max_value=len(jobs),
-				redirect_stdout=True
-			)
+			extractionArgs = (args.dyld_path, outputDir, i, imagePath, loggingLevel)
+			jobs.append((imagePath, pool.apply_async(_extractImage, extractionArgs)))
 			pass
+
+		# setup a progress bar
+		progressBar = progressbar.ProgressBar(
+			max_value=len(jobs),
+			redirect_stdout=True
+		)
 
 		# Record potential logging output for each job
 		jobOutputs: list[str] = []
@@ -136,9 +219,6 @@ def _main() -> None:
 				if job.ready():
 					jobs.pop(i)
 
-					jobsComplete += 1
-					progressBar.update(jobsComplete)
-
 					imageName = imagePath.split("/")[-1]
 					print(f"Processed: {imageName}")
 
@@ -148,6 +228,9 @@ def _main() -> None:
 						jobOutputs.append(summary)
 						print(summary)
 						pass
+
+					jobsComplete += 1
+					progressBar.update(jobsComplete)
 					pass
 				pass
 			pass
@@ -155,12 +238,12 @@ def _main() -> None:
 		# close the pool and cleanup
 		pool.close()
 		pool.join()
-		progressBar.update(jobsComplete)
+		progressBar.update(jobsComplete, force=True)
 
 		# reprint any job output
 		print("\n\n----- Summary -----")
 		print("".join(jobOutputs))
-		print("-------------------\n\n")
+		print("-------------------\n")
 		pass
 	pass
 
