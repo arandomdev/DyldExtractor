@@ -86,6 +86,13 @@ class _ObjCFixer(object):
 		# connects a selrefs old target to its pointer address
 		self._selRefCache: dict[int, int] = {}
 
+		# A list of class pointers that are being processed.
+		self._classesProcessing: list[int] = []
+
+		# A list of pointers that need to be updated at the end,
+		# tuples of the pointer offset and its target class
+		self._futurePointers: list[tuple[int, int]] = []
+
 		self._processSections()
 		self._fixSelectors()
 
@@ -279,7 +286,7 @@ class _ObjCFixer(object):
 		self._categoryCache[categoryAddr] = newCategoryAddr
 		return newCategoryAddr
 
-	def _processClass(self, classAddr: int, _noRecur=False) -> int:
+	def _processClass(self, classAddr: int) -> int:
 		"""Process a class definition.
 
 		Args:
