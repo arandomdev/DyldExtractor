@@ -89,11 +89,14 @@ class _ObjCFixer(object):
 		# A list of class pointers that are being processed.
 		self._classesProcessing: list[int] = []
 
-		# A list of pointers that need to be updated at the end,
-		# tuples of the pointer offset and its target class
-		self._futurePointers: list[tuple[int, int]] = []
+		# A list of pointers that need to be updated at the end
+		# The first int is the address to the pointer that needs
+		# to be changed. The second int is the address of the
+		# target class
+		self._futureClasses: list[tuple[int, int]] = []
 
 		self._processSections()
+		self._finalizeFutureClasses()
 		self._fixSelectors()
 
 		self._checkSpaceConstraints()
@@ -173,7 +176,10 @@ class _ObjCFixer(object):
 						classAddr = self._slider.slideAddress(ptrAddr)
 
 						if self._machoCtx.containsAddr(classAddr):
-							self._processClass(classAddr)
+							if self._processClass(classAddr)[1]:
+								self._futureClasses.append((ptrAddr, classAddr))
+								pass
+
 							continue
 
 						self._logger.warning(f"Class pointer at {hex(ptrAddr)} points to class outside MachO file.")  # noqa
@@ -247,8 +253,9 @@ class _ObjCFixer(object):
 			categoryDef.name = self._processString(categoryDef.name)
 			pass
 
+		needsFutureClass = False
 		if categoryDef.cls:
-			categoryDef.cls = self._processClass(categoryDef.cls)
+			categoryDef.cls, needsFutureClass = self._processClass(categoryDef.cls)
 			pass
 
 		if categoryDef.instanceMethods:
@@ -283,32 +290,51 @@ class _ObjCFixer(object):
 			self._addExtraData(categoryDef)
 			pass
 
+		if needsFutureClass:
+			futureClass = (
+				newCategoryAddr + objc_category_t.cls.offset,
+				categoryDef.cls
+			)
+			self._futureClasses.append(futureClass)
+			pass
+
 		self._categoryCache[categoryAddr] = newCategoryAddr
 		return newCategoryAddr
 
-	def _processClass(self, classAddr: int) -> int:
+	def _processClass(self, classAddr: int) -> tuple[int, bool]:
 		"""Process a class definition.
 
 		Args:
 			defAddr: The address of the class definition.
 
 		Returns:
-			The final address of the class definition.
+			If the class if fully defined the updated address
+			of the class is returned along with False. otherwise
+			the original address of the class is returned, along
+			with True.
 		"""
 
-		if classAddr in self._classCache:
-			return self._classCache[classAddr]
+		# check if the class is already being processed.
+		if classAddr in self._classesProcessing:
+			return classAddr, True
 
+		# check if the class was processed before
+		if classAddr in self._classCache:
+			return self._classCache[classAddr], False
+
+		self._classesProcessing.append(classAddr)
 		classDef = self._slider.slideStruct(classAddr, objc_class_t)
 
-		if classDef.isa and not _noRecur:
-			# only go down by one
-			classDef.isa = self._processClass(classDef.isa, _noRecur=True)
+		needsFutureIsa = False
+		if classDef.isa:
+			classDef.isa, needsFutureIsa = self._processClass(classDef.isa)
 			pass
 
-		if classDef.superclass and not _noRecur:
-			# only go down by one
-			classDef.superclass = self._processClass(classDef.superclass, _noRecur=True)
+		needsFutureSuper = False
+		if classDef.superclass:
+			classDef.superclass, needsFutureSuper = self._processClass(
+				classDef.superclass
+			)
 			pass
 
 		# zero out cache and vtable
@@ -317,7 +343,11 @@ class _ObjCFixer(object):
 
 		if classDef.data:
 			# Low bit marks Swift classes
-			classDef.data = self._processClassData(classDef.data & ~0x3)
+			isStubClass = not self._machoCtx.containsAddr(classAddr)
+			classDef.data = self._processClassData(
+				classDef.data & ~0x3,
+				isStubClass=isStubClass
+			)
 			pass
 
 		# add or update data
@@ -339,10 +369,27 @@ class _ObjCFixer(object):
 			self._addExtraData(classDef)
 			pass
 
-		self._classCache[classAddr] = classAddr
-		return newClassAddr
+		# add any future pointers if necessary
+		if needsFutureIsa:
+			futureClass = (
+				newClassAddr + objc_class_t.isa.offset,
+				classDef.isa
+			)
+			self._futureClasses.append(futureClass)
+			pass
+		if needsFutureSuper:
+			futureClass = (
+				newClassAddr + objc_class_t.superclass.offset,
+				classDef.superclass
+			)
+			self._futureClasses.append(futureClass)
+			pass
 
-	def _processClassData(self, classDataAddr: int) -> int:
+		self._classesProcessing.remove(classAddr)
+		self._classCache[classAddr] = newClassAddr
+		return newClassAddr, False
+
+	def _processClassData(self, classDataAddr: int, isStubClass=False) -> int:
 		if classDataAddr in self._classDataCache:
 			return self._classDataCache[classDataAddr]
 
@@ -357,7 +404,10 @@ class _ObjCFixer(object):
 			pass
 
 		if classDataDef.baseMethods:
-			classDataDef.baseMethods = self._processMethodList(classDataDef.baseMethods)
+			classDataDef.baseMethods = self._processMethodList(
+				classDataDef.baseMethods,
+				noImp=isStubClass
+			)
 			pass
 
 		if classDataDef.baseProtocols:
@@ -763,6 +813,29 @@ class _ObjCFixer(object):
 
 		self._intCache[intAddr] = newIntAddr
 		return newIntAddr
+
+	def _finalizeFutureClasses(self) -> None:
+		extraSegStart = self._extraDataHead - len(self._extraData)
+
+		while len(self._futureClasses):
+			futureClass = self._futureClasses.pop()
+
+			newAddr, needsFuture = self._processClass(futureClass[1])
+			if needsFuture:
+				self._logger.error(f"Unable to resolve class pointer at {hex(futureClass[0])}")  # noqa
+				continue
+
+			destPtr = futureClass[0]
+			if destPtr >= extraSegStart and destPtr < self._extraDataHead:
+				ptrOffset = destPtr - extraSegStart
+				struct.pack_into("<Q", self._extraData, ptrOffset, newAddr)
+				pass
+			else:
+				ptrOffset = self._dyldCtx.convertAddr(destPtr)
+				struct.pack_into("Q", self._machoCtx.file, ptrOffset, newAddr)
+				pass
+			pass
+		pass
 
 	def _fixSelectors(self) -> None:
 		"""Undo direct selector loading.
