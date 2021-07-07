@@ -65,7 +65,7 @@ class _ObjCFixer(object):
 			"<I"
 		)[0]
 		if not flags & 0x8:
-			self._logger.warning("ObjC was not optimized by Dyld, not fixing ObjC.")
+			self._logger.info("ObjC was not optimized by Dyld, not fixing ObjC.")
 			return
 
 		self._createExtraSegment()
@@ -360,12 +360,6 @@ class _ObjCFixer(object):
 
 		else:
 			newClassAddr = self._extraDataHead
-
-			# Repoint the isa if it originally pointed to its self
-			if classDef.isa == classAddr:
-				classDef.isa = newClassAddr
-				pass
-
 			self._addExtraData(classDef)
 			pass
 
@@ -965,7 +959,7 @@ class _ObjCFixer(object):
 		commandsToRemove = []
 
 		# LC_UUID
-		self._logger.warning("Not enough header space, removing UUID command.")
+		self._logger.info("Not enough header space, removing UUID command.")
 		if uuidCmd := self._machoCtx.getLoadCommand((LoadCommands.LC_UUID,)):
 			commandsToRemove.append(uuidCmd)
 			bytesSaved += uuidCmd.cmdsize

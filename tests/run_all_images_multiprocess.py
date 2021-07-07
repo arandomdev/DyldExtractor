@@ -21,7 +21,9 @@ from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.converter import (
 	linkedit_optimizer,
 	stub_fixer,
-	objc_fixer
+	objc_fixer,
+	slide_info,
+	macho_offset
 )
 
 
@@ -64,9 +66,12 @@ def _imageRunner(dyldPath: str, imageIndex: int) -> None:
 		)
 
 		try:
-			linkedit_optimizer.optimizeLinkedit(extractionCtx)
-			stub_fixer.fixStubs(extractionCtx)
+			# TODO: implement a way to select convertors
+			# slide_info.processSlideInfo(extractionCtx)
+			# linkedit_optimizer.optimizeLinkedit(extractionCtx)
+			# stub_fixer.fixStubs(extractionCtx)
 			objc_fixer.fixObjC(extractionCtx)
+			# macho_offset.optimizeOffsets(extractionCtx)
 		except Exception as e:
 			logger.exception(e)
 		pass
