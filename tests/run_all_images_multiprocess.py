@@ -67,11 +67,11 @@ def _imageRunner(dyldPath: str, imageIndex: int) -> None:
 
 		try:
 			# TODO: implement a way to select convertors
-			# slide_info.processSlideInfo(extractionCtx)
-			# linkedit_optimizer.optimizeLinkedit(extractionCtx)
-			# stub_fixer.fixStubs(extractionCtx)
+			slide_info.processSlideInfo(extractionCtx)
+			linkedit_optimizer.optimizeLinkedit(extractionCtx)
+			stub_fixer.fixStubs(extractionCtx)
 			objc_fixer.fixObjC(extractionCtx)
-			# macho_offset.optimizeOffsets(extractionCtx)
+			macho_offset.optimizeOffsets(extractionCtx)
 		except Exception as e:
 			logger.exception(e)
 		pass
