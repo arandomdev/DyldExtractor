@@ -141,7 +141,7 @@ class _ObjCFixer(object):
 		# Get a starting address for the new segment
 		newSegStartAddr = (leftSeg.vmaddr + leftSeg.vmsize + 0x1000) & ~0xFFF
 		newSegStartOff = (
-			self._dyldCtx.convertAddr(leftSeg.vmaddr + leftSeg.vmsize)
+			self._dyldCtx.convertAddr(leftSeg.vmaddr) + leftSeg.vmsize
 			+ 0x1000
 		) & ~0xFFF
 

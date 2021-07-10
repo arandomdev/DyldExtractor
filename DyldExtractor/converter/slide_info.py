@@ -88,6 +88,9 @@ class _V2Rebaser(object):
 
 		endAddr = ((segment.vmaddr + segment.vmsize) - dataStart) + pageSize
 		endIndex = int(endAddr / pageSize)
+		if endIndex == len(pageStarts) + 1:
+			endIndex -= 2
+			pass
 
 		for i in range(startIndex, endIndex):
 			page = pageStarts[i]

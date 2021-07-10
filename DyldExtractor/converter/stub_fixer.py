@@ -1419,6 +1419,15 @@ class _StubFixer(object):
 
 			stubSymbol = next((sym for sym in funcSymbols if sym in stubMap), None)
 			if not stubSymbol:
+				# Same as above
+				lastInstTop = self._machoCtx.file[instrOff + 3] & 0xFC
+				if (
+					lastInstTop == 0x94  # bl
+					or lastInstTop == 0x14  # b
+					or lastInstTop == 0xD6  # br
+				):
+					continue
+
 				self._logger.warning(f"Unable to find a stub for branch at {hex(brAddr)}, potential symbols: {funcSymbols}")  # noqa
 				continue
 
