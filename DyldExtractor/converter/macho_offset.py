@@ -82,15 +82,18 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> None:
 
 		if segname == b"__LINKEDIT":
 			_updateLinkEdit(machoCtx, shiftDelta)
+			pass
 
 		# Change the offsets for the segment and section structures
 		segment.seg.fileoff += shiftDelta
 		for sect in segment.sects.values():
-			sect.offset += shiftDelta
+			sect.offset = max(sect.offset + shiftDelta, 0)
+			pass
 
 		# update the data head to the next page aligned offset
 		dataHead += segment.seg.filesize
 		dataHead += _PAGE_SIZE - (dataHead % _PAGE_SIZE)
+		pass
 
 	# Now we need to actually move the segments.
 	# 	We are moving the segments now because then we
@@ -99,6 +102,7 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> None:
 		extractionCtx.statusBar.update(status="Moving Segments")
 
 		machoCtx.file.move(procedure[0], procedure[1], procedure[2])
+		pass
 
 	# re-create the MachOContext so it reflects the new offsets
 	extractionCtx.machoCtx = MachOContext(machoCtx.file, 0)

@@ -1,7 +1,5 @@
 import struct
 from typing import (
-	Any,
-	Callable,
 	Type,
 	TypeVar,
 	Union,
@@ -323,7 +321,7 @@ class PointerSlider(object):
 			mapping = pair[0]
 			mappingHighBound = mapping.fileOffset + mapping.size
 
-			if offset >= mapping.fileOffset and offset < mappingHighBound:
+			if offset in range(mapping.fileOffset, mapping.fileOffset + mapping.size):
 				slideInfo = pair[1]
 
 				# regular arm64 pointer

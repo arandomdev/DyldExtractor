@@ -46,11 +46,8 @@ class DyldContext(FileContext):
 		"""
 
 		for mapping in self.mappings:
-			lowBound = mapping.address
-			highBound = mapping.address + mapping.size
-
-			if vmaddr >= lowBound and vmaddr < highBound:
-				mappingOff = vmaddr - lowBound
+			if vmaddr in range(mapping.address, mapping.address + mapping.size):
+				mappingOff = vmaddr - mapping.address
 				return mapping.fileOffset + mappingOff
 
 		# didn't find the address in any mappings...
