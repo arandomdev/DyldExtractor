@@ -321,7 +321,7 @@ class PointerSlider(object):
 			mapping = pair[0]
 			mappingHighBound = mapping.fileOffset + mapping.size
 
-			if offset in range(mapping.fileOffset, mapping.fileOffset + mapping.size):
+			if offset >= mapping.fileOffset and offset < mappingHighBound:
 				slideInfo = pair[1]
 
 				# regular arm64 pointer
