@@ -4,10 +4,10 @@ Extract Binaries from Apple's Dyld Shared Cache to be useful in a disassembler.
 ## Examples
 ```
 # To look for an image
-python .\extractor.py -l -f SpringBoard DSC_File
+python .\dyldex.py -l -f SpringBoard DSC_File
 
 # To extract an image
-python .\extractor.py -e SpringBoard.framework\SpringBoard DSC_File
+python .\dyldex.py -e SpringBoard.framework\SpringBoard DSC_File
 ```
 
 # Dependencies
