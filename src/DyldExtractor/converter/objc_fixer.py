@@ -842,7 +842,7 @@ class _ObjCFixer(object):
 			pass
 		except KeyError:
 			self._logger.error("Unable to get __text section")
-			pass
+			return
 
 		self._statusBar.update(status="Fixing Selectors")
 
@@ -857,9 +857,15 @@ class _ObjCFixer(object):
 
 			addOff = textSectOff + sectOff + 4
 			if self._machoCtx.file[addOff + 3] != 0x91:
-				continue
+				# Sometimes there is an irrelevant instruction between the two instructions
+				if self._machoCtx.file[addOff + 7] == 0x91:
+					addOff += 4
+					pass
+				else:
+					continue
 
-			adrp, add = self._machoCtx.readFormat(adrpOff, "<II")
+			adrp = self._machoCtx.readFormat(adrpOff, "<I")[0]
+			add = self._machoCtx.readFormat(addOff, "<I")[0]
 
 			# verify that the ADRP Destination register matches
 			# the ADD Base register
@@ -895,15 +901,19 @@ class _ObjCFixer(object):
 				adrpDelta = (stringAddr & -4096) - (adrpAddr & -4096)
 				immhi = (adrpDelta >> 9) & (0x00FFFFE0)
 				immlo = (adrpDelta << 17) & (0x60000000)
-				newAdrp = (0x90000000) | immlo | immhi | adrpDestReg
+				newAdrpInstr = (0x90000000) | immlo | immhi | adrpDestReg
 
 				addOff = stringAddr - (stringAddr & -4096)
 				imm12 = (addOff << 10) & 0x3FFC00
 				addDestReg = add & 0x1F
-				newAdd = 0x91000000 | imm12 | (addBaseReg << 5) | addDestReg
+				newAddInstr = 0x91000000 | imm12 | (addBaseReg << 5) | addDestReg
 
-				instructions = struct.pack("<II", newAdrp, newAdd)
-				self._machoCtx.writeBytes(adrpOff, instructions)
+				# Write
+				newAdrpInstr = struct.pack("<I", newAdrp)
+				self._machoCtx.writeBytes(adrpOff, newAdrpInstr)
+
+				newAddInstr = struct.pack("<I", newLdr)
+				self._machoCtx.writeBytes(addOff, newAddInstr)
 
 				self._statusBar.update(status="Fixing Selectors")
 				continue
@@ -922,8 +932,11 @@ class _ObjCFixer(object):
 			newLdr = 0xF9400000 | imm12 | (addBaseReg << 5) | ldrDestReg
 
 			# write to new instructions
-			instructions = struct.pack("<II", newAdrp, newLdr)
-			self._machoCtx.writeBytes(adrpOff, instructions)
+			newAdrpInstr = struct.pack("<I", newAdrp)
+			self._machoCtx.writeBytes(adrpOff, newAdrpInstr)
+
+			newAddInstr = struct.pack("<I", newLdr)
+			self._machoCtx.writeBytes(addOff, newAddInstr)
 
 			self._statusBar.update(status="Fixing Selectors")
 			pass
