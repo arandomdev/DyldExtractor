@@ -857,9 +857,15 @@ class _ObjCFixer(object):
 
 			addOff = textSectOff + sectOff + 4
 			if self._machoCtx.file[addOff + 3] != 0x91:
-				continue
+				# Some times there is an instruction in between
+				if self._machoCtx.file[addOff + 7] == 0x91:
+					addOff += 4
+					pass
+				else:
+					continue
 
-			adrp, add = self._machoCtx.readFormat(adrpOff, "<II")
+			adrp = self._machoCtx.readFormat(adrpOff, "<I")[0]
+			add = self._machoCtx.readFormat(addOff, "<I")[0]
 
 			# verify that the ADRP Destination register matches
 			# the ADD Base register
@@ -902,8 +908,8 @@ class _ObjCFixer(object):
 				addDestReg = add & 0x1F
 				newAdd = 0x91000000 | imm12 | (addBaseReg << 5) | addDestReg
 
-				instructions = struct.pack("<II", newAdrp, newAdd)
-				self._machoCtx.writeBytes(adrpOff, instructions)
+				self._machoCtx.writeBytes(adrpOff, struct.pack("<I", newAdrp))
+				self._machoCtx.writeBytes(addOff, struct.pack("<I", newAdd))
 
 				self._statusBar.update(status="Fixing Selectors")
 				continue
@@ -922,8 +928,8 @@ class _ObjCFixer(object):
 			newLdr = 0xF9400000 | imm12 | (addBaseReg << 5) | ldrDestReg
 
 			# write to new instructions
-			instructions = struct.pack("<II", newAdrp, newLdr)
-			self._machoCtx.writeBytes(adrpOff, instructions)
+			self._machoCtx.writeBytes(adrpOff, struct.pack("<I", newAdrp))
+			self._machoCtx.writeBytes(addOff, struct.pack("<I", newLdr))
 
 			self._statusBar.update(status="Fixing Selectors")
 			pass
