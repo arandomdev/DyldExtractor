@@ -1,7 +1,7 @@
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))  # noqa
+sys.path.append(os.path.dirname(os.path.dirname(__file__)) + "/src/")  # noqa
 
 import progressbar
 import mmap

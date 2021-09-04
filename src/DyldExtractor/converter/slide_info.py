@@ -189,6 +189,7 @@ class _V3Rebaser(object):
 
 		endAddr = ((segment.vmaddr + segment.vmsize) - dataStart) + pageSize
 		endIndex = int(endAddr / pageSize)
+		endIndex = min(endIndex, len(pageStarts))
 
 		for i in range(startIndex, endIndex):
 			page = pageStarts[i]
