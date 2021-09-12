@@ -857,9 +857,12 @@ class _ObjCFixer(object):
 
 			addOff = textSectOff + sectOff + 4
 			if self._machoCtx.file[addOff + 3] != 0x91:
-				# Some times there is an instruction in between
+				# Some times there are extra instructions in between
 				if self._machoCtx.file[addOff + 7] == 0x91:
 					addOff += 4
+					pass
+				elif self._machoCtx.file[addOff + 11] == 0x91:
+					addOff += 8
 					pass
 				else:
 					continue
