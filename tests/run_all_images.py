@@ -1,8 +1,3 @@
-import sys
-import os
-
-sys.path.append(os.path.dirname(os.path.dirname(__file__)) + "/src/")  # noqa
-
 import progressbar
 import mmap
 import logging
@@ -128,9 +123,9 @@ def main():
 		dyldFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
 		dyldCtx = DyldContext(dyldFile)
 
-		# runForAllImages(f, dyldCtx, statusBar, logger, stopIndex=1030)
+		runForAllImages(f, dyldCtx, statusBar, logger, stopIndex=20)
 		# runForAllImages(f, dyldCtx, statusBar, logger, startIndex=1020)
-		runForAllImages(f, dyldCtx, statusBar, logger)
+		# runForAllImages(f, dyldCtx, statusBar, logger)
 	pass
 
 

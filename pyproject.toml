@@ -2,6 +2,7 @@
 requires = [
     "setuptools>=42",
     "wheel",
-    "progressbar2"
+    "progressbar2",
+    "capstone"
 ]
 build-backend = "setuptools.build_meta"

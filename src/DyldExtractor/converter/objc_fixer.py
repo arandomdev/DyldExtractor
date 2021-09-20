@@ -1,4 +1,5 @@
 import struct
+import capstone as cp
 
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.converter import (
@@ -31,6 +32,228 @@ from DyldExtractor.macho.macho_structs import (
 
 
 class _ObjCFixerError(Exception):
+	pass
+
+
+class _ObjCSelectorFixer(object):
+	def __init__(
+		self,
+		extractionCtx: ExtractionContext,
+		delegate: "_ObjCFixer"
+	) -> None:
+		"""Un-does direct selector loading.
+
+		Args:
+			extractionCtx: The extraction context
+			delegate: The delegate to add more data if needed.
+		"""
+
+		super().__init__()
+
+		self._dyldCtx = extractionCtx.dyldCtx
+		self._machoCtx = extractionCtx.machoCtx
+		self._statusBar = extractionCtx.statusBar
+		self._logger = extractionCtx.logger
+		self._delegate = delegate
+		pass
+
+	def run(self):
+		try:
+			textSect = self._machoCtx.segments[b"__TEXT"].sects[b"__text"]
+			pass
+		except KeyError:
+			self._logger.error("Unable to get __text section")
+			pass
+
+		self._statusBar.update(status="Fixing Selectors")
+
+		disassembler = cp.Cs(cp.CS_ARCH_ARM64, cp.CS_MODE_LITTLE_ENDIAN)
+
+		textSectAddr = textSect.addr
+		textSectOff = self._dyldCtx.convertAddr(textSectAddr)
+		textSectEnd = textSectOff + textSect.size
+
+		for sectOff in range(0, textSect.size, 4):
+			# Direct Selectors start with an ADRP instruction
+			adrpOff = textSectOff + sectOff
+			if self._dyldCtx.file[adrpOff + 3] & 0x9F != 0x90:
+				continue
+			adrpAddr = textSectAddr + sectOff
+
+			# try to find the matching add instruction
+			addRelOff = self._findAddInstr(
+				disassembler,
+				adrpAddr,
+				adrpOff,
+				textSectEnd
+			)
+			if addRelOff is None:
+				continue
+
+			addOff = adrpOff + addRelOff
+
+			adrpInstr = self._dyldCtx.readFormat(adrpOff, "<I")[0]
+			addInstr = self._dyldCtx.readFormat(addOff, "<I")[0]
+
+			# Find the target of the direct selector load
+			# ADRP
+			immlo = (adrpInstr & 0x60000000) >> 29
+			immhi = (adrpInstr & 0xFFFFE0) >> 3
+			imm = (immhi | immlo) << 12
+			imm = stub_fixer.Arm64Utilities.signExtend(imm, 33)
+
+			adrpResult = (adrpAddr & ~0xFFF) + imm
+
+			# ADD
+			imm = (addInstr & 0x3FFC00) >> 10
+			loadTarget = adrpResult + imm
+
+			# check if it needs fixing
+			if self._machoCtx.containsAddr(loadTarget):
+				continue
+
+			if loadTarget not in self._delegate._selRefCache:
+				# check if its a valid address
+				if not self._dyldCtx.convertAddr(loadTarget):
+					continue
+
+				self._addStringAndFixLoad(
+					loadTarget,
+					adrpInstr,
+					adrpAddr,
+					adrpOff,
+					addInstr,
+					addOff
+				)
+				self._statusBar.update(status="Fixing Selectors")
+				continue
+
+			self._fixLoad(
+				loadTarget,
+				adrpInstr,
+				adrpAddr,
+				adrpOff,
+				addInstr,
+				addOff
+			)
+			self._statusBar.update(status="Fixing Selectors")
+			pass
+		pass
+
+	def _fixLoad(
+		self,
+		loadTarget: int,
+		adrpInstr: int,
+		adrpAddr: int,
+		adrpOff: int,
+		addInstr: int,
+		addOff: int
+	):
+		selRefPtr = self._delegate._selRefCache[loadTarget]
+
+		adrpDelta = (selRefPtr & -4096) - (adrpAddr & -4096)
+		immhi = (adrpDelta >> 9) & (0x00FFFFE0)
+		immlo = (adrpDelta << 17) & (0x60000000)
+		newAdrp = (0x90000000) | immlo | immhi | adrpInstr & 0x1F
+
+		ldrTargetOff = selRefPtr - (selRefPtr & -4096)
+		imm12 = (ldrTargetOff << 7) & 0x3FFC00
+		ldrRegisters = addInstr & 0x3FF
+		newLdr = 0xF9400000 | imm12 | ldrRegisters
+
+		self._machoCtx.writeBytes(adrpOff, struct.pack("<I", newAdrp))
+		self._machoCtx.writeBytes(addOff, struct.pack("<I", newLdr))
+		pass
+
+	def _addStringAndFixLoad(
+		self,
+		loadTarget: int,
+		adrpInstr: int,
+		adrpAddr: int,
+		adrpOff: int,
+		addInstr: int,
+		addOff: int
+	):
+		# There are some files that access strings that do not have
+		# a selector reference. Pull in the string and repoint the
+		# ADRP and ADD to it.
+		stringAddr = self._delegate._processString(loadTarget)
+
+		adrpDelta = (stringAddr & -4096) - (adrpAddr & -4096)
+		immhi = (adrpDelta >> 9) & (0x00FFFFE0)
+		immlo = (adrpDelta << 17) & (0x60000000)
+		newAdrp = (0x90000000) | immlo | immhi | adrpInstr & 0x1F
+
+		addTargetOff = stringAddr - (stringAddr & -4096)
+		imm12 = (addTargetOff << 10) & 0x3FFC00
+		addRegisters = addInstr & 0x3FF
+		newAdd = 0x91000000 | imm12 | addRegisters
+
+		self._machoCtx.writeBytes(adrpOff, struct.pack("<I", newAdrp))
+		self._machoCtx.writeBytes(addOff, struct.pack("<I", newAdd))
+		pass
+
+	def _findAddInstr(
+		self,
+		disassembler: cp.Cs,
+		adrpAddr: int,
+		adrpOff: int,
+		textEnd: int
+	) -> int:
+		"""Find the address of a matching add instruction.
+
+		Args:
+			disassembler: The initalized disassembler.
+			adrpAddr: The address of the ADRP instruction.
+			adrpOff: The file offset of the ADRP instruction.
+			textEnd: The file offset to the end of the text section.
+
+		Return:
+			The relative offset to the add instruction, or None if it
+			could not be found.
+		"""
+
+		# get the destination register for the ADRP
+		adrpData = self._dyldCtx.getBytes(adrpOff, 4)
+		adrpInstr = next(disassembler.disasm_lite(adrpData, adrpAddr, 1))
+
+		if adrpInstr[2] != "adrp":
+			self._logger.error(f"Expected an adrp instruction at {hex(adrpAddr)}")
+			return None
+
+		adrpDestReg = self._getOpcodes(adrpInstr[3])[0]
+
+		instrBlockOff = adrpOff + 4
+		instrBlockAddr = adrpAddr + 4
+		while instrBlockOff < textEnd:
+			# process instructions in 64 byte chunks
+			blockSlice = slice(instrBlockOff, min(instrBlockOff + 64, textEnd))
+			instrData = self._dyldCtx.file[blockSlice]
+
+			for instruction in disassembler.disasm_lite(instrData, instrBlockAddr):
+				# instruction = (address, size, mnemonic, op_str)
+				opcodes = self._getOpcodes(instruction[3])
+
+				# check if the ADRP dest reg matches the base reg for ADD
+				if instruction[2] == "add" and opcodes[1] == adrpDestReg:
+					return instruction[0] - adrpAddr
+
+				# If we find an instruction using the register,
+				# it probably isn't a selector reference
+				if adrpDestReg in opcodes:
+					return None
+				pass
+
+			# process the next block if needed
+			instrBlockOff += len(instrData)
+			instrBlockAddr += len(instrData)
+			pass
+
+		return None
+
+	def _getOpcodes(self, opStr: str) -> list[str]:
+		trans = str.maketrans("", "", "[]!")
+		return [opcode.strip() for opcode in opStr.translate(trans).split(",")]
 	pass
 
 
@@ -97,7 +320,9 @@ class _ObjCFixer(object):
 
 		self._processSections()
 		self._finalizeFutureClasses()
-		self._fixSelectors()
+
+		# self._fixSelectors_OLD()
+		_ObjCSelectorFixer(self._extractionCtx, self).run()
 
 		self._checkSpaceConstraints()
 		self._addExtraDataSeg()
@@ -831,7 +1056,7 @@ class _ObjCFixer(object):
 			pass
 		pass
 
-	def _fixSelectors(self) -> None:
+	def _fixSelectors_OLD(self) -> None:
 		"""Undo direct selector loading.
 
 		Changes instructions to use the selref section again.

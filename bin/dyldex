@@ -158,49 +158,49 @@ def main():
 	)
 
 	with open(args.dyld_path, "rb") as f:
-		with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as dyldFile:
-			dyldCtx = DyldContext(dyldFile)
+		dyldFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+		dyldCtx = DyldContext(dyldFile)
 
-			# enumerate images, create a map of paths and images
-			imageMap = {}
-			for imageData in dyldCtx.images:
-				path = dyldCtx.readString(imageData.pathFileOffset)
-				path = path[0:-1]  # remove null terminator
-				path = path.decode("utf-8")
+		# enumerate images, create a map of paths and images
+		imageMap = {}
+		for imageData in dyldCtx.images:
+			path = dyldCtx.readString(imageData.pathFileOffset)
+			path = path[0:-1]  # remove null terminator
+			path = path.decode("utf-8")
 
-				imageMap[path] = imageData
+			imageMap[path] = imageData
 
-			# list images option
-			if args.list_frameworks:
-				imagePaths = imageMap.keys()
+		# list images option
+		if args.list_frameworks:
+			imagePaths = imageMap.keys()
 
-				# filter if needed
-				if args.filter:
-					filterTerm = args.filter.strip().lower()
-					imagePaths = _filterImages(imagePaths, filterTerm)
+			# filter if needed
+			if args.filter:
+				filterTerm = args.filter.strip().lower()
+				imagePaths = _filterImages(imagePaths, filterTerm)
 
-				print("Listing Images\n--------------")
-				for path in imagePaths:
-					print(path)
+			print("Listing Images\n--------------")
+			for path in imagePaths:
+				print(path)
 
+			return
+
+		# extract image option
+		if args.extract:
+			extractionTarget = args.extract.strip()
+			targetPaths = _filterImages(imageMap.keys(), extractionTarget)
+			if len(targetPaths) == 0:
+				print(f"Unable to find image \"{extractionTarget}\"")
 				return
 
-			# extract image option
-			if args.extract:
-				extractionTarget = args.extract.strip()
-				targetPaths = _filterImages(imageMap.keys(), extractionTarget)
-				if len(targetPaths) == 0:
-					print(f"Unable to find image \"{extractionTarget}\"")
-					return
+			outputPath = args.output
+			if outputPath is None:
+				outputPath = pathlib.Path("binaries/" + extractionTarget)
+				os.makedirs(outputPath.parent, exist_ok=True)
 
-				outputPath = args.output
-				if outputPath is None:
-					outputPath = pathlib.Path("binaries/" + extractionTarget)
-					os.makedirs(outputPath.parent, exist_ok=True)
-
-				print(f"Extracting {targetPaths[0]}")
-				_extractImage(f, dyldCtx, imageMap[targetPaths[0]], outputPath)
-				return
+			print(f"Extracting {targetPaths[0]}")
+			_extractImage(f, dyldCtx, imageMap[targetPaths[0]], outputPath)
+			return
 
 
 if "__main__" == __name__:
