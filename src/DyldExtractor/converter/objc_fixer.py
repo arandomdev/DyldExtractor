@@ -55,6 +55,8 @@ class _ObjCSelectorFixer(object):
 		self._statusBar = extractionCtx.statusBar
 		self._logger = extractionCtx.logger
 		self._delegate = delegate
+
+		self.opStrTrans = str.maketrans("", "", "[]!")
 		pass
 
 	def run(self):
@@ -214,8 +216,11 @@ class _ObjCSelectorFixer(object):
 		"""
 
 		# get the destination register for the ADRP
-		adrpData = self._dyldCtx.getBytes(adrpOff, 4)
-		adrpInstr = next(disassembler.disasm_lite(adrpData, adrpAddr, 1))
+		# process instructions in 64 byte chunks
+		blockSlice = slice(adrpOff, min(adrpOff + 64, textEnd))
+		instrData = self._dyldCtx.file[blockSlice]
+		blockDisasm = disassembler.disasm_lite(instrData, adrpAddr)
+		adrpInstr = next(blockDisasm)
 
 		if adrpInstr[2] != "adrp":
 			self._logger.error(f"Expected an adrp instruction at {hex(adrpAddr)}")
@@ -226,11 +231,7 @@ class _ObjCSelectorFixer(object):
 		instrBlockOff = adrpOff + 4
 		instrBlockAddr = adrpAddr + 4
 		while instrBlockOff < textEnd:
-			# process instructions in 64 byte chunks
-			blockSlice = slice(instrBlockOff, min(instrBlockOff + 64, textEnd))
-			instrData = self._dyldCtx.file[blockSlice]
-
-			for instruction in disassembler.disasm_lite(instrData, instrBlockAddr):
+			for instruction in blockDisasm:
 				# instruction = (address, size, mnemonic, op_str)
 				opcodes = self._getOpcodes(instruction[3])
 
@@ -247,13 +248,20 @@ class _ObjCSelectorFixer(object):
 			# process the next block if needed
 			instrBlockOff += len(instrData)
 			instrBlockAddr += len(instrData)
+
+			blockSlice = slice(instrBlockOff, min(instrBlockOff + 64, textEnd))
+			instrData = self._dyldCtx.file[blockSlice]
+			blockDisasm = disassembler.disasm_lite(instrData, instrBlockAddr)
 			pass
 
 		return None
 
 	def _getOpcodes(self, opStr: str) -> list[str]:
-		trans = str.maketrans("", "", "[]!")
-		return [opcode.strip() for opcode in opStr.translate(trans).split(",")]
+		return [
+			opcode.strip()
+			for opcode
+			in opStr.translate(self.opStrTrans).split(",")
+		]
 	pass
 
 
