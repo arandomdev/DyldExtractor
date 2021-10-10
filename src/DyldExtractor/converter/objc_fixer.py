@@ -239,9 +239,9 @@ class _ObjCSelectorFixer(object):
 				if instruction[2] == "add" and opcodes[1] == adrpDestReg:
 					return instruction[0] - adrpAddr
 
-				# If we find an instruction using the register,
+				# If we find an instruction modifying the register,
 				# it probably isn't a selector reference
-				if adrpDestReg in opcodes:
+				if adrpDestReg == opcodes[0]:
 					return None
 				pass
 
