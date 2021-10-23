@@ -265,6 +265,294 @@ class _ObjCSelectorFixer(object):
 	pass
 
 
+class _ObjCSelectorFixerV2(object):
+	def __init__(
+		self,
+		extractionCtx: ExtractionContext,
+		delegate: "_ObjCFixer"
+	) -> None:
+		"""Un-does direct selector loading... second try.
+
+		Args:
+			extractionCtx: The extraction context
+			delegate: The delegate to add more data if needed.
+		"""
+
+		super().__init__()
+
+		self._dyldCtx = extractionCtx.dyldCtx
+		self._machoCtx = extractionCtx.machoCtx
+		self._statusBar = extractionCtx.statusBar
+		self._logger = extractionCtx.logger
+		self._delegate = delegate
+
+		# All the instructions in the text section.
+		# The instruction at index 0 corresponds to
+		# the first instruction.
+		self._textInstr: tuple[int, str, tuple[str]] = None
+		pass
+
+	def run(self) -> None:
+		try:
+			textSect = self._machoCtx.segments[b"__TEXT"].sects[b"__text"]
+			pass
+		except KeyError:
+			self._logger.error("Unable to get __text section")
+			return
+
+		self._textInstr = self._disasmText()
+		if not self._textInstr:
+			return
+
+		self._statusBar.update(status="Fixing Selectors")
+
+		# enumerate the text
+		textSectAddr = textSect.addr
+		textSectOff = self._dyldCtx.convertAddr(textSectAddr)
+
+		for i, instrData in enumerate(self._textInstr):
+			if instrData[1] != "adrp":
+				continue
+
+			adrpReg = instrData[2][0]
+			addInstrIdxs = self._findAddInstructions(i + 1, adrpReg)
+			if not addInstrIdxs:
+				continue
+			addInstrIdxs = sorted(addInstrIdxs)
+
+			adrpAddr = textSectAddr + (i * 4)
+			adrpOff = textSectOff + (i * 4)
+			adrpInstr = self._dyldCtx.readFormat(adrpOff, "<I")[0]
+
+			# Find the ADRP result
+			immlo = (adrpInstr & 0x60000000) >> 29
+			immhi = (adrpInstr & 0xFFFFE0) >> 3
+			imm = (immhi | immlo) << 12
+			imm = stub_fixer.Arm64Utilities.signExtend(imm, 33)
+			adrpResult = (adrpAddr & ~0xFFF) + imm
+
+			newAdrpTarget = None
+
+			for addInstrIdx in addInstrIdxs:
+				addOff = textSectOff + (addInstrIdx * 4)
+				addInstr = self._dyldCtx.readFormat(addOff, "<I")[0]
+
+				# Test for a special ADD cases
+				if addInstr & 0xffc00000 != 0x91000000:
+					continue
+
+				# Find the ADD result
+				imm = (addInstr & 0x3FFC00) >> 10
+				loadTarget = adrpResult + imm
+
+				# check if it needs fixing
+				if self._machoCtx.containsAddr(loadTarget):
+					continue
+
+				if loadTarget not in self._delegate._selRefCache:
+					continue
+				newRefAddr = self._delegate._selRefCache[loadTarget]
+
+				if newAdrpTarget is None:
+					# Fix the ADRP on the first ADD
+					newAdrpTarget = (newRefAddr & -4096)
+
+					adrpDelta = newAdrpTarget - (adrpAddr & -4096)
+					immhi = (adrpDelta >> 9) & (0x00FFFFE0)
+					immlo = (adrpDelta << 17) & (0x60000000)
+					newAdrp = (0x90000000) | immlo | immhi | adrpInstr & 0x1F
+					self._machoCtx.writeBytes(adrpOff, struct.pack("<I", newAdrp))
+					pass
+				else:
+					# Make sure the new address is reachable with the new adrp
+					delta = newRefAddr - newAdrpTarget
+					if delta < 0 or delta > 4095:
+						self._logger.warning(f"Unable to reach selector reference at: {hex(textSectAddr + (addInstrIdx * 4))}, with new ADRP target: {hex(newAdrpTarget)}, load target: {hex(newRefAddr)}, ADRP delta: {hex(delta)}")  # noqa
+						continue
+					pass
+
+				# Fix it
+				ldrTargetOff = newRefAddr - (newRefAddr & -4096)
+				imm12 = (ldrTargetOff << 7) & 0x3FFC00
+				ldrRegisters = addInstr & 0x3FF
+				newLdr = 0xF9400000 | imm12 | ldrRegisters
+				self._machoCtx.writeBytes(addOff, struct.pack("<I", newLdr))
+
+				self._statusBar.update(status="Fixing Selectors")
+				pass
+			pass
+		pass
+
+	def _disasmText(self) -> tuple[int, str, tuple[str]]:
+		"""Disassemble and save the __text section."""
+
+		self._statusBar.update(status="Disassembling Text (will appear frozen)")
+
+		textSect = self._machoCtx.segments[b"__TEXT"].sects[b"__text"]
+		textSectOff = self._dyldCtx.convertAddr(textSect.addr)
+		textData = self._dyldCtx.getBytes(textSectOff, textSect.size)
+
+		opStrTrans = str.maketrans("", "", "[]!")
+		disassembler = cp.Cs(cp.CS_ARCH_ARM64, cp.CS_MODE_LITTLE_ENDIAN)
+
+		# Capstone 4.0.2 doesn't support some newer PAC instructions like
+		# retab or pacibsp, and when it encounters these, it just stops.
+		# Due to this, we have to detect this and add these instructions
+		# manually, at least until Capstone is updated.
+		textDataAddr = textSect.addr
+		instructions = []
+		while True:
+			# Format the instructions like this (address, mnemonic, (opcodes, ...))
+			newInstrs = [
+				(instruction[0], instruction[2], [
+					opcode.strip()
+					for opcode
+					in instruction[3].translate(opStrTrans).split(",")
+				])
+				for instruction
+				in disassembler.disasm_lite(textData, textDataAddr)
+			]
+
+			# Check if everything was disassembled
+			if len(instructions) + len(newInstrs) == (textSect.size / 4):
+				instructions += newInstrs
+				break
+
+			# Attempt to recover from an unknown instruction
+			byteOffset = len(newInstrs) * 4
+			textDataAddr += byteOffset
+			nextInstr = textData[byteOffset:byteOffset + 4]
+			if nextInstr == b"\xff\x0b_\xd6":  # retaa
+				newInstrs.append((textDataAddr, "retaa", []))
+				pass
+			elif nextInstr == b"\xff\x0f_\xd6":  # retab
+				newInstrs.append((textDataAddr, "retab", []))
+				pass
+			else:
+				newInstrs.append((textDataAddr, "UNKNOWN", [""]))
+				pass
+
+			instructions += newInstrs
+			textData = textData[len(newInstrs) * 4:]
+			textDataAddr += 4
+			pass
+
+		return instructions
+
+	def _findAddInstructions(
+		self,
+		startIdx: int,
+		adrpReg: str,
+		_processed: set[int] = None
+	) -> set[int]:
+		"""Find ADD instructions given an ADRP register.
+
+		This will recursively follow branches and stop
+		when the ADRP range ends.
+
+		Args:
+			startIdx: The instruction index to start at.
+		Returns:
+			A list of indices to the ADD instructions.
+		"""
+
+		# Keep track of start indexes that are already processed
+		if _processed is None:
+			_processed = {startIdx}
+			pass
+		else:
+			if startIdx in _processed:
+				return set()
+			else:
+				_processed.add(startIdx)
+			pass
+
+		addIdxs = set()
+		i = startIdx
+
+		while i < len(self._textInstr):
+			address, mnemonic, opcodes = self._textInstr[i]
+
+			# check if the ADRP dest reg matches the base reg for the ADD
+			if mnemonic == "add" and opcodes[1] == adrpReg:
+				addIdxs.add(i)
+				pass
+
+			# If there is an unconditional branch, and it points
+			# within the text section, follow it. If it does not
+			# point within the text section, end the ADRP range.
+			if mnemonic == "b":
+				branchAddr = int(opcodes[0][1:], 16)
+				idxDelta = int((branchAddr - address) / 4)
+				i += idxDelta
+
+				if i in _processed:
+					break
+				else:
+					_processed.add(i)
+
+				if i < 0 or i >= len(self._textInstr):
+					break
+				continue
+
+			# If there is a conditional branch, follow it and continue
+			if mnemonic[0:2] == "b.":
+				branchAddr = int(opcodes[0][1:], 16)
+				idxDelta = int((branchAddr - address) / 4)
+				addIdxs.update(
+					self._findAddInstructions(i + idxDelta, adrpReg, _processed=_processed)
+				)
+				pass
+			if mnemonic == "cbz" or mnemonic == "cbnz":
+				branchAddr = int(opcodes[1][1:], 16)
+				idxDelta = int((branchAddr - address) / 4)
+				addIdxs.update(
+					self._findAddInstructions(i + idxDelta, adrpReg, _processed=_processed)
+				)
+				pass
+			if mnemonic == "tbz" or mnemonic == "tbnz":
+				branchAddr = int(opcodes[2][1:], 16)
+				idxDelta = int((branchAddr - address) / 4)
+				addIdxs.update(
+					self._findAddInstructions(i + idxDelta, adrpReg, _processed=_processed)
+				)
+				pass
+
+			# End the ADRP range if the function returns
+			if mnemonic in (
+				"ret",
+				"retaa",
+				"retab"
+			):
+				break
+
+			# If we find an instruction modifying the register,
+			# the adrp range probably ended.
+			if adrpReg == opcodes[0]:
+				break
+
+			# These instructions modify 2 registers.
+			if mnemonic in (
+				"ldaxp",
+				"ldnp",
+				"ldpsw",
+				"ldxp",
+				"stlxp",
+				"stnp",
+				"stp",
+				"stxp",
+				"ldp"
+			):
+				if adrpReg == opcodes[1]:
+					break
+				pass
+
+			i += 1
+			pass
+
+		return addIdxs
+
+
 class _ObjCFixer(object):
 
 	def __init__(self, extractionCtx: ExtractionContext) -> None:
@@ -330,7 +618,8 @@ class _ObjCFixer(object):
 		self._finalizeFutureClasses()
 
 		# self._fixSelectors_OLD()
-		_ObjCSelectorFixer(self._extractionCtx, self).run()
+		# _ObjCSelectorFixer(self._extractionCtx, self).run()
+		_ObjCSelectorFixerV2(self._extractionCtx, self).run()
 
 		self._checkSpaceConstraints()
 		self._addExtraDataSeg()
