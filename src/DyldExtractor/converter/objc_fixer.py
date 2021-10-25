@@ -1,4 +1,5 @@
 import struct
+import ctypes
 import capstone as cp
 
 from DyldExtractor.extraction_context import ExtractionContext
@@ -29,6 +30,38 @@ from DyldExtractor.macho.macho_structs import (
 	mach_header_64,
 	segment_command_64
 )
+
+
+# Change modify the disasm_lite to accept an offset
+# This is used to speed up the disassembly, and should
+# be removed when capstone is updated
+def disasm_lite_new(self, code, offset, count=0, codeOffset=0):
+	if self._diet:
+		# Diet engine cannot provide @mnemonic & @op_str
+		raise cp.CsError(cp.CS_ERR_DIET)
+
+	all_insn = ctypes.POINTER(cp._cs_insn)()
+	size = len(code) - codeOffset
+	# Pass a bytearray by reference
+	if isinstance(code, bytearray):
+		code = ctypes.byref(ctypes.c_char.from_buffer(code, codeOffset))
+	res = cp._cs.cs_disasm(self.csh, code, size, offset, count, ctypes.byref(all_insn))
+	if res > 0:
+		try:
+			for i in range(res):
+				insn = all_insn[i]
+				yield (insn.address, insn.size, insn.mnemonic.decode('ascii'), insn.op_str.decode('ascii'))
+		finally:
+			cp._cs.cs_free(all_insn, res)
+	else:
+		status = cp._cs.cs_errno(self.csh)
+		if status != cp.CS_ERR_OK:
+			raise cp.CsError(status)
+		return
+		yield
+
+
+cp.Cs.disasm_lite = disasm_lite_new
 
 
 class _ObjCFixerError(Exception):
@@ -367,12 +400,12 @@ class _ObjCSelectorFixerV2(object):
 					# Make sure the new address is reachable with the new adrp
 					delta = newRefAddr - newAdrpTarget
 					if delta < 0 or delta > 4095:
-						self._logger.warning(f"Unable to reach selector reference at: {hex(textSectAddr + (addInstrIdx * 4))}, with new ADRP target: {hex(newAdrpTarget)}, load target: {hex(newRefAddr)}, ADRP delta: {hex(delta)}")  # noqa
+						self._logger.warning(f"Unable to reach possible selector reference at: {hex(textSectAddr + (addInstrIdx * 4))}, with new ADRP target: {hex(newAdrpTarget)}, load target: {hex(newRefAddr)}, ADRP delta: {hex(delta)}")  # noqa
 						continue
 					pass
 
 				# Fix it
-				ldrTargetOff = newRefAddr - (newRefAddr & -4096)
+				ldrTargetOff = newRefAddr - newAdrpTarget
 				imm12 = (ldrTargetOff << 7) & 0x3FFC00
 				ldrRegisters = addInstr & 0x3FF
 				newLdr = 0xF9400000 | imm12 | ldrRegisters
@@ -390,7 +423,7 @@ class _ObjCSelectorFixerV2(object):
 
 		textSect = self._machoCtx.segments[b"__TEXT"].sects[b"__text"]
 		textSectOff = self._dyldCtx.convertAddr(textSect.addr)
-		textData = self._dyldCtx.getBytes(textSectOff, textSect.size)
+		textData = bytearray(self._dyldCtx.getBytes(textSectOff, textSect.size))
 
 		opStrTrans = str.maketrans("", "", "[]!")
 		disassembler = cp.Cs(cp.CS_ARCH_ARM64, cp.CS_MODE_LITTLE_ENDIAN)
@@ -399,9 +432,10 @@ class _ObjCSelectorFixerV2(object):
 		# retab or pacibsp, and when it encounters these, it just stops.
 		# Due to this, we have to detect this and add these instructions
 		# manually, at least until Capstone is updated.
+		textDataOff = 0
 		textDataAddr = textSect.addr
 		instructions = []
-		while True:
+		while textDataOff < textSect.size:
 			# Format the instructions like this (address, mnemonic, (opcodes, ...))
 			newInstrs = [
 				(instruction[0], instruction[2], [
@@ -410,7 +444,7 @@ class _ObjCSelectorFixerV2(object):
 					in instruction[3].translate(opStrTrans).split(",")
 				])
 				for instruction
-				in disassembler.disasm_lite(textData, textDataAddr)
+				in disassembler.disasm_lite(textData, textDataAddr, codeOffset=textDataOff)
 			]
 
 			# Check if everything was disassembled
@@ -420,12 +454,13 @@ class _ObjCSelectorFixerV2(object):
 
 			# Attempt to recover from an unknown instruction
 			byteOffset = len(newInstrs) * 4
+			textDataOff += byteOffset
 			textDataAddr += byteOffset
-			nextInstr = textData[byteOffset:byteOffset + 4]
-			if nextInstr == b"\xff\x0b_\xd6":  # retaa
+			nextInstr = textData[textDataOff:textDataOff + 4]
+			if nextInstr == b"\xff\x0b\x5f\xd6":  # retaa
 				newInstrs.append((textDataAddr, "retaa", []))
 				pass
-			elif nextInstr == b"\xff\x0f_\xd6":  # retab
+			elif nextInstr == b"\xff\x0f\x5f\xd6":  # retab
 				newInstrs.append((textDataAddr, "retab", []))
 				pass
 			else:
@@ -433,7 +468,7 @@ class _ObjCSelectorFixerV2(object):
 				pass
 
 			instructions += newInstrs
-			textData = textData[len(newInstrs) * 4:]
+			textDataOff += 4
 			textDataAddr += 4
 			pass
 
@@ -470,7 +505,7 @@ class _ObjCSelectorFixerV2(object):
 		addIdxs = set()
 		i = startIdx
 
-		while i < len(self._textInstr):
+		while i < len(self._textInstr) and i >= 0:
 			address, mnemonic, opcodes = self._textInstr[i]
 
 			# check if the ADRP dest reg matches the base reg for the ADD
@@ -503,14 +538,14 @@ class _ObjCSelectorFixerV2(object):
 					self._findAddInstructions(i + idxDelta, adrpReg, _processed=_processed)
 				)
 				pass
-			if mnemonic == "cbz" or mnemonic == "cbnz":
+			elif mnemonic == "cbz" or mnemonic == "cbnz":
 				branchAddr = int(opcodes[1][1:], 16)
 				idxDelta = int((branchAddr - address) / 4)
 				addIdxs.update(
 					self._findAddInstructions(i + idxDelta, adrpReg, _processed=_processed)
 				)
 				pass
-			if mnemonic == "tbz" or mnemonic == "tbnz":
+			elif mnemonic == "tbz" or mnemonic == "tbnz":
 				branchAddr = int(opcodes[2][1:], 16)
 				idxDelta = int((branchAddr - address) / 4)
 				addIdxs.update(
