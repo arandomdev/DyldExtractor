@@ -1,8 +1,0 @@
-[build-system]
-requires = [
-    "setuptools>=42",
-    "wheel",
-    "progressbar2",
-    "capstone==4.0.2"
-]
-build-backend = "setuptools.build_meta"
