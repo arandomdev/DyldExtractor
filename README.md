@@ -1,19 +1,26 @@
 # DyldExtractor
 Extract Binaries from Apple's Dyld Shared Cache to be useful in a disassembler.
 
-## Examples
-```
-# To look for an image
-python .\dyldex.py -l -f SpringBoard DSC_File
+# Installation
 
-# To extract an image
-python .\dyldex.py -e SpringBoard.framework\SpringBoard DSC_File
+```
+python3 -m pip install git+git://github.com/arandomdev/DyldExtractor.git
 ```
 
-# Dependencies
-* python >= 3.9.5
-* progressbar2, https://pypi.org/project/progressbar2/
-* Has only been tested on iOS 13.5 and 14.4 caches
+# Usage Examples
+
+```
+
+# Listing Framework names containing <Filter Text>
+dyldex -l -f <Filter Text> [dyld_shared_cache_path]
+
+# Extracting a framework
+dyldex -e SpringBoard.framework\SpringBoard [dyld_shared_cache_path]
+
+# Extracting all frameworks/libraries from a shared cache
+dyldex_all [dyld_shared_cache_path]
+
+```
 
 # Explanation
 The Dyld Shared Cache (DSC) is Apple's method of optimizing the loading of system libraries (images). They do this by analyzing and combining the images in a way that it bypasses a lot of processes. This extractor uses several convertors that aim to reverse the optimization done so that images can be reverse engineered easier. The order that these convertors are run is in reverse order of the optimization done.
