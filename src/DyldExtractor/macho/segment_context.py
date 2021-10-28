@@ -1,4 +1,5 @@
 from mmap import mmap
+from typing import List, Dict
 
 from DyldExtractor.structure import Structure
 
@@ -12,8 +13,8 @@ class SegmentContext(object):
 
 	seg: segment_command_64
 
-	sects: dict[bytes, section_64]
-	sectsI: list[section_64]
+	sects: Dict[bytes, section_64]
+	sectsI: List[section_64]
 
 	def __init__(self, file: mmap, segment: segment_command_64) -> None:
 		"""Represents a segment.

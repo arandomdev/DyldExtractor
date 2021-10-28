@@ -1,4 +1,5 @@
 from mmap import mmap
+from typing import List
 
 from DyldExtractor.file_context import FileContext
 from DyldExtractor.dyld.dyld_structs import (
@@ -11,8 +12,8 @@ from DyldExtractor.dyld.dyld_structs import (
 class DyldContext(FileContext):
 
 	header: dyld_cache_header
-	mappings: list[dyld_cache_mapping_info]
-	images: list[dyld_cache_image_info]
+	mappings: List[dyld_cache_mapping_info]
+	images: List[dyld_cache_image_info]
 
 	def __init__(self, file: mmap) -> None:
 		"""A wrapper around a dyld file.

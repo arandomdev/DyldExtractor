@@ -1,5 +1,6 @@
 import struct
 import ctypes
+from typing import List, Set, Dict, Tuple
 import capstone as cp
 
 from DyldExtractor.extraction_context import ExtractionContext
@@ -289,7 +290,7 @@ class _ObjCSelectorFixer(object):
 
 		return None
 
-	def _getOpcodes(self, opStr: str) -> list[str]:
+	def _getOpcodes(self, opStr: str) -> List[str]:
 		return [
 			opcode.strip()
 			for opcode
@@ -416,7 +417,7 @@ class _ObjCSelectorFixerV2(object):
 			pass
 		pass
 
-	def _disasmText(self) -> tuple[int, str, tuple[str]]:
+	def _disasmText(self) -> Tuple[int, str, Tuple[str]]:
 		"""Disassemble and save the __text section."""
 
 		self._statusBar.update(status="Disassembling Text (will appear frozen)")
@@ -478,8 +479,8 @@ class _ObjCSelectorFixerV2(object):
 		self,
 		startIdx: int,
 		adrpReg: str,
-		_processed: set[int] = None
-	) -> set[int]:
+		_processed: Set[int] = None
+	) -> Set[int]:
 		"""Find ADD instructions given an ADRP register.
 
 		This will recursively follow branches and stop
@@ -626,28 +627,28 @@ class _ObjCFixer(object):
 
 		# caches that map the original definition address
 		# to its new processed address.
-		self._categoryCache: dict[int, int] = {}
-		self._classCache: dict[int, int] = {}
-		self._classDataCache: dict[int, int] = {}
-		self._ivarListCache: dict[int, int] = {}
-		self._protocolListCache: dict[int, int] = {}
-		self._protocolCache: dict[int, int] = {}
-		self._propertyListCache: dict[int, int] = {}
-		self._methodListCache: dict[int, int] = {}
-		self._stringCache: dict[int, int] = {}
-		self._intCache: dict[int, int] = {}
+		self._categoryCache: Dict[int, int] = {}
+		self._classCache: Dict[int, int] = {}
+		self._classDataCache: Dict[int, int] = {}
+		self._ivarListCache: Dict[int, int] = {}
+		self._protocolListCache: Dict[int, int] = {}
+		self._protocolCache: Dict[int, int] = {}
+		self._propertyListCache: Dict[int, int] = {}
+		self._methodListCache: Dict[int, int] = {}
+		self._stringCache: Dict[int, int] = {}
+		self._intCache: Dict[int, int] = {}
 
 		# connects a selrefs old target to its pointer address
-		self._selRefCache: dict[int, int] = {}
+		self._selRefCache: Dict[int, int] = {}
 
 		# A list of class pointers that are being processed.
-		self._classesProcessing: list[int] = []
+		self._classesProcessing: List[int] = []
 
 		# A list of pointers that need to be updated at the end
 		# The first int is the address to the pointer that needs
 		# to be changed. The second int is the address of the
 		# target class
-		self._futureClasses: list[tuple[int, int]] = []
+		self._futureClasses: List[Tuple[int, int]] = []
 
 		self._processSections()
 		self._finalizeFutureClasses()
@@ -858,7 +859,7 @@ class _ObjCFixer(object):
 		self._categoryCache[categoryAddr] = newCategoryAddr
 		return newCategoryAddr
 
-	def _processClass(self, classAddr: int) -> tuple[int, bool]:
+	def _processClass(self, classAddr: int) -> Tuple[int, bool]:
 		"""Process a class definition.
 
 		Args:

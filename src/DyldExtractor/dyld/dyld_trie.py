@@ -4,10 +4,12 @@ from mmap import mmap
 
 from DyldExtractor import leb128
 
+from typing import Tuple, List
+
 from DyldExtractor.macho.macho_constants import *
 
 
-def _readString(file: mmap, readHead: int) -> tuple[bytes, int]:
+def _readString(file: mmap, readHead: int) -> Tuple[bytes, int]:
 	"""Read a null terminated string.
 
 	Returns:
@@ -55,7 +57,7 @@ class ExportReaderError(Exception):
 
 class _ExportTrieReader(object):
 
-	exports: list[ExportInfo]
+	exports: List[ExportInfo]
 
 	def __init__(
 		self,
@@ -121,7 +123,7 @@ def ReadExports(
 	file: mmap,
 	exportOff: int,
 	exportSize: int
-) -> list[ExportInfo]:
+) -> List[ExportInfo]:
 	"""Read an export trie.
 
 	Args:
