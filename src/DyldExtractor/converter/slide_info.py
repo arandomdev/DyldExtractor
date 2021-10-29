@@ -3,6 +3,8 @@ from typing import (
 	Type,
 	TypeVar,
 	Union,
+	Tuple,
+	List
 )
 
 from DyldExtractor.extraction_context import ExtractionContext
@@ -65,7 +67,7 @@ class _V2Rebaser(object):
 
 	def _rebaseSegment(
 		self,
-		pageStarts: tuple[int],
+		pageStarts: Tuple[int],
 		segment: segment_command_64
 	) -> None:
 		"""Process all slide info for a segment"""
@@ -170,7 +172,7 @@ class _V3Rebaser(object):
 
 	def _rebaseSegment(
 		self,
-		pageStarts: tuple[int],
+		pageStarts: Tuple[int],
 		segment: segment_command_64
 	) -> None:
 		# check if the segment is included in the mapping
@@ -230,7 +232,7 @@ class _V3Rebaser(object):
 
 def _getMappingSlidePairs(
 	extractionCtx: ExtractionContext
-) -> list[tuple[Union[dyld_cache_mapping_info, dyld_cache_slide_info2]]]:
+) -> List[Tuple[Union[dyld_cache_mapping_info, dyld_cache_slide_info2]]]:
 	dyldCtx = extractionCtx.dyldCtx
 	logger = extractionCtx.logger
 

@@ -8,13 +8,7 @@ import mmap
 import os
 import sys
 from io import BufferedReader
-
-try:
-	assert sys.version_info >= (3, 9, 5)
-except AssertionError:
-	print("Python 3.9.5 or greater is required", file=sys.stderr)
-	exit(1)
-
+from typing import List
 try:
 	progressbar.streams
 except AttributeError:
@@ -123,7 +117,7 @@ def _extractImage(
 	statusBar.update(unit="Extractor", status="Done")
 
 
-def _filterImages(imagePaths: list[str], filterTerm: str):
+def _filterImages(imagePaths: List[str], filterTerm: str):
 	filteredPaths = []
 	filterTerm = filterTerm.lower()
 

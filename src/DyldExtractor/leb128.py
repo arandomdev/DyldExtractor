@@ -1,6 +1,6 @@
+from typing import Tuple
 
-
-def decodeUleb128(buffer: bytes, readHead: int) -> tuple[int, int]:
+def decodeUleb128(buffer: bytes, readHead: int) -> Tuple[int, int]:
 	"""Read a Uleb128 value.
 
 	Args:
@@ -58,7 +58,7 @@ def encodeUleb128(value: int) -> bytes:
 	return bytes(data)
 
 
-def decodeSleb128(buffer: bytes, readHead: int) -> tuple[int, int]:
+def decodeSleb128(buffer: bytes, readHead: int) -> Tuple[int, int]:
 	"""Read a 64bit Sleb128 value.
 
 	Args:

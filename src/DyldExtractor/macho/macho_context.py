@@ -1,7 +1,7 @@
 import struct
 from mmap import mmap
 
-from typing import Union
+from typing import Union, List, Dict, Tuple
 
 from DyldExtractor.file_context import FileContext
 
@@ -18,10 +18,10 @@ from DyldExtractor.macho.macho_structs import (
 
 class MachOContext(FileContext):
 
-	loadCommands: list[load_command]
+	loadCommands: List[load_command]
 
-	segments: dict[bytes, SegmentContext]
-	segmentsI: list[SegmentContext]
+	segments: Dict[bytes, SegmentContext]
+	segmentsI: List[SegmentContext]
 
 	def __init__(
 		self,
@@ -51,9 +51,9 @@ class MachOContext(FileContext):
 
 	def getLoadCommand(
 		self,
-		cmdFilter: tuple[LoadCommands],
+		cmdFilter: Tuple[LoadCommands],
 		multiple: bool = False
-	) -> Union[load_command, tuple[load_command]]:
+	) -> Union[load_command, Tuple[load_command]]:
 		"""Retreive a load command with its command ID
 
 		Args:

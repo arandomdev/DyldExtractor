@@ -1,7 +1,7 @@
 import dataclasses
 import enum
 import struct
-from typing import Iterator
+from typing import Iterator, List, Tuple, Dict
 
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.file_context import FileContext
@@ -61,7 +61,7 @@ class _Symbolizer(object):
 		self._enumerateSymbols()
 		pass
 
-	def symbolizeAddr(self, addr: int) -> list[bytes]:
+	def symbolizeAddr(self, addr: int) -> List[bytes]:
 		"""Get the name of a function at the address.
 
 		Args:
@@ -79,8 +79,8 @@ class _Symbolizer(object):
 	def _enumerateExports(self) -> None:
 		# process the dependencies iteratively,
 		# skipping ones already processed
-		depsQueue: list[_DependencyInfo] = []
-		depsProcessed: list[bytes] = []
+		depsQueue: List[_DependencyInfo] = []
+		depsProcessed: List[bytes] = []
 
 		# load commands for all dependencies
 		DEP_LCS = (
@@ -179,7 +179,7 @@ class _Symbolizer(object):
 	def _readDepExports(
 		self,
 		depInfo: _DependencyInfo
-	) -> list[dyld_trie.ExportInfo]:
+	) -> List[dyld_trie.ExportInfo]:
 		exportOff = None
 		exportSize = None
 
@@ -215,7 +215,7 @@ class _Symbolizer(object):
 	def _cacheDepExports(
 		self,
 		depInfo: _DependencyInfo,
-		exports: list[dyld_trie.ExportInfo]
+		exports: List[dyld_trie.ExportInfo]
 	) -> None:
 		for export in exports:
 			if not export.address:
@@ -331,7 +331,7 @@ class Arm64Utilities(object):
 		)
 
 		# A cache of resolved stub chains
-		self._resolveCache: dict[int, int] = {}
+		self._resolveCache: Dict[int, int] = {}
 		pass
 
 	def generateStubNormal(self, stubAddress: int, ldrAddress: int) -> bytes:
@@ -421,7 +421,7 @@ class Arm64Utilities(object):
 		self._resolveCache[address] = target
 		return target
 
-	def resolveStub(self, address: int) -> tuple[int, _StubFormat]:
+	def resolveStub(self, address: int) -> Tuple[int, _StubFormat]:
 		"""Get the stub and its format.
 
 		Args:
@@ -464,7 +464,7 @@ class Arm64Utilities(object):
 
 		return data
 
-	def getResolverData(self, address: int) -> tuple[int, int]:
+	def getResolverData(self, address: int) -> Tuple[int, int]:
 		"""Get the data of a resolver.
 
 		This is a stub helper that branches to a function
@@ -1015,17 +1015,17 @@ class _StubFixer(object):
 		self._fixIndirectSymbols(symbolPtrs, stubMap)
 		pass
 
-	def _enumerateSymbolPointers(self) -> dict[bytes, tuple[int]]:
+	def _enumerateSymbolPointers(self) -> Dict[bytes, Tuple[int]]:
 		"""Generate a mapping between a pointer's symbol and its address.
 		"""
 
 		# read all the bind records as they're a source of symbolic info
-		bindRecords: dict[int, _BindRecord] = {}
+		bindRecords: Dict[int, _BindRecord] = {}
 		dyldInfo: dyld_info_command = self._machoCtx.getLoadCommand(
 			(LoadCommands.LC_DYLD_INFO, LoadCommands.LC_DYLD_INFO_ONLY)
 		)
 		if dyldInfo:
-			records: list[_BindRecord] = []
+			records: List[_BindRecord] = []
 			try:
 				if dyldInfo.weak_bind_size:
 					# usually contains records for c++ symbols like "new"
@@ -1067,7 +1067,7 @@ class _StubFixer(object):
 			pass
 
 		# enumerate all symbol pointers
-		symbolPtrs: dict[bytes, list[int]] = {}
+		symbolPtrs: Dict[bytes, List[int]] = {}
 
 		def _addToMap(ptrSymbol: bytes, ptrAddr: int, section: section_64):
 			if ptrSymbol in symbolPtrs:
@@ -1210,12 +1210,12 @@ class _StubFixer(object):
 
 	def _fixStubs(
 		self,
-		symbolPtrs: dict[bytes, tuple[int]]
-	) -> dict[bytes, tuple[int]]:
+		symbolPtrs: Dict[bytes, Tuple[int]]
+	) -> Dict[bytes, Tuple[int]]:
 		"""Relink stubs to their symbol pointers
 		"""
 
-		stubMap: dict[bytes, list[int]] = {}
+		stubMap: Dict[bytes, List[int]] = {}
 
 		def _addToMap(stubName: bytes, stubAddr: int):
 			if stubName in stubMap:
@@ -1360,7 +1360,7 @@ class _StubFixer(object):
 
 		return stubMap
 
-	def _fixCallsites(self, stubMap: dict[bytes, tuple[int]]) -> None:
+	def _fixCallsites(self, stubMap: Dict[bytes, Tuple[int]]) -> None:
 		if (
 			b"__TEXT" not in self._machoCtx.segments
 			or b"__text" not in self._machoCtx.segments[b"__TEXT"].sects
@@ -1443,8 +1443,8 @@ class _StubFixer(object):
 
 	def _fixIndirectSymbols(
 		self,
-		symbolPtrs: dict[bytes, tuple[int]],
-		stubMap: dict[bytes, tuple[int]]
+		symbolPtrs: Dict[bytes, Tuple[int]],
+		stubMap: Dict[bytes, Tuple[int]]
 	) -> None:
 		"""Fix indirect symbols.
 
