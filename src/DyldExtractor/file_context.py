@@ -1,16 +1,21 @@
 import struct
-from mmap import mmap
-from typing import Any
+import mmap
+from typing import Any, BinaryIO
 
 
 class FileContext:
 
-	fileOffset: int
-	file: mmap
-
-	def __init__(self, file: mmap, offset: int = 0) -> None:
-		self.fileOffset = offset
-		self.file = file
+	def __init__(
+		self,
+		fileObject: BinaryIO,
+		copyMode: bool = False
+	) -> None:
+		self.fileObject = fileObject
+		self.file = mmap.mmap(
+			fileObject.fileno(),
+			0,
+			access=mmap.ACCESS_COPY if copyMode else mmap.ACCESS_READ
+		)
 		pass
 
 	def readString(self, offset: int) -> bytes:
@@ -67,3 +72,6 @@ class FileContext:
 		self.file.seek(offset)
 		self.file.write(data)
 		pass
+
+	def makeCopy(self) -> "FileContext":
+		return type(self)(self.fileObject, copyMode=True)

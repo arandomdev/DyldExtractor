@@ -68,6 +68,26 @@ class dyld_cache_header(Structure):
 	otherTrieSize: int 				# size of trie of dylibs and bundles with dlopen closures
 	mappingWithSlideOffset: int 	# file offset to first dyld_cache_mapping_and_slide_info
 	mappingWithSlideCount: int 		# number of dyld_cache_mapping_and_slide_info entries
+	dataMappingStartAddr: int
+	dylibsImageArrayWithSubCachesAddr: int
+	progClosuresWithSubCachesAddr: int
+	progClosuresWithSubCachesSize: int
+	progClosuresTrieWithSubCachesAddr: int
+	progClosuresTrieWithSubCachesSize: int
+	dyld4Info: int
+	unknown1: int
+	unknown2: int
+	unknownOffset1: int
+	unknownSize1: int
+	subCacheInfoOffset: int
+	numSubCaches: int
+	symbolSubCacheUUID: bytes
+	unknown3: int
+	unknown4: int
+	unknown5: int
+	unknown6: int
+	imagesOffsetWithSubCaches: int 	# file offset to first dyld_cache_image_info
+	imagesCountWithSubCaches: int 	# number of dyld_cache_image_info entries
 
 	_fields_ = [
 		("magic", c_char * 16),
@@ -118,6 +138,26 @@ class dyld_cache_header(Structure):
 		("otherTrieSize", c_uint64),
 		("mappingWithSlideOffset", c_uint32),
 		("mappingWithSlideCount", c_uint32),
+		("dataMappingStartAddr", c_uint64),
+		("dylibsImageArrayWithSubCachesAddr", c_uint64),
+		("progClosuresWithSubCachesAddr", c_uint64),
+		("progClosuresWithSubCachesSize", c_uint64),
+		("progClosuresTrieWithSubCachesAddr", c_uint64),
+		("progClosuresTrieWithSubCachesSize", c_uint32),
+		("dyld4Info", c_uint32),
+		("unknown1", c_uint32),
+		("unknown2", c_uint32),
+		("unknownOffset1", c_uint64),
+		("unknownSize1", c_uint64),
+		("subCacheInfoOffset", c_uint32),
+		("numSubCaches", c_uint32),
+		("symbolSubCacheUUID", c_uint8 * 16),
+		("unknown3", c_uint64),
+		("unknown4", c_uint64),
+		("unknown5", c_uint64),
+		("unknown6", c_uint64),
+		("imagesOffsetWithSubCaches", c_uint32),
+		("imagesCountWithSubCaches", c_uint32),
 	]
 
 

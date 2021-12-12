@@ -1,5 +1,4 @@
 import struct
-from mmap import mmap
 
 from typing import Union, List, Dict, Tuple
 
@@ -16,7 +15,7 @@ from DyldExtractor.macho.macho_structs import (
 )
 
 
-class MachOContext(FileContext):
+class MachOContext(object):
 
 	loadCommands: List[load_command]
 
@@ -25,7 +24,7 @@ class MachOContext(FileContext):
 
 	def __init__(
 		self,
-		file: mmap,
+		fileCtx: FileContext,
 		offset: int
 	) -> None:
 		"""A wrapper around a MachO file.
@@ -37,9 +36,12 @@ class MachOContext(FileContext):
 			offset: The offset to the header in the file.
 		"""
 
-		super().__init__(file, offset=offset)
+		super().__init__()
 
-		self.header = mach_header_64(file, offset)
+		self.fileCtx = fileCtx
+		self.fileOffset = offset
+
+		self.header = mach_header_64(fileCtx.file, offset)
 
 		# check to make sure the MachO file is 64 bit
 		magic = self.header.magic
@@ -111,23 +113,24 @@ class MachOContext(FileContext):
 		self.segments = {}
 		self.segmentsI = []
 
+		file = self.fileCtx.file
 		cmdOff = len(self.header) + self.fileOffset
 		for _ in range(self.header.ncmds):
-			self.file.seek(cmdOff)
-			cmd = struct.unpack("<I", self.file.read(4))[0]
+			file.seek(cmdOff)
+			cmd = struct.unpack("<I", file.read(4))[0]
 
 			command = LoadCommandMap.get(cmd, UnknownLoadCommand)
 			if command == UnknownLoadCommand:
 				raise Exception(f"Unknown LoadCommand: {cmd}")
 
-			command = command(self.file, cmdOff)
+			command = command(file, cmdOff)
 
 			cmdOff += command.cmdsize
 			self.loadCommands.append(command)
 
 			# populate the segments at this point too
 			if isinstance(command, segment_command_64):
-				segCtx = SegmentContext(self.file, command)
+				segCtx = SegmentContext(file, command)
 
 				self.segments[command.segname] = segCtx
 				self.segmentsI.append(segCtx)

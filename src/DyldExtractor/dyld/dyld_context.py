@@ -1,5 +1,4 @@
-from mmap import mmap
-from typing import List
+from typing import List, Tuple
 
 from DyldExtractor.file_context import FileContext
 from DyldExtractor.dyld.dyld_structs import (
@@ -9,50 +8,62 @@ from DyldExtractor.dyld.dyld_structs import (
 )
 
 
-class DyldContext(FileContext):
+class DyldContext(object):
 
-	header: dyld_cache_header
-	mappings: List[dyld_cache_mapping_info]
-	images: List[dyld_cache_image_info]
-
-	def __init__(self, file: mmap) -> None:
+	def __init__(self, file: FileContext) -> None:
 		"""A wrapper around a dyld file.
 
 		Provides convenient methods and attributes for a given dyld file.
 
 		Args:
-			file: an open dyld file.
+			file: an open dyld file. Or the main cache file in the case of
+				sub caches.
 		"""
 
-		super().__init__(file, offset=0)
+		super().__init__()
 
-		self.header = dyld_cache_header(file)
+		self.fileCtx = file
+		self.header = dyld_cache_header(file.file)
 
-		self.mappings = []
+		self.mappings: List[Tuple[dyld_cache_mapping_info, DyldContext]] = []
 		for i in range(self.header.mappingCount):
 			offset = self.header.mappingOffset + (i * dyld_cache_mapping_info.SIZE)
-			self.mappings.append(dyld_cache_mapping_info(file, offset))
+			self.mappings.append((dyld_cache_mapping_info(file.file, offset), self))
+			pass
 
-		self.images = []
-		for i in range(self.header.imagesCount):
-			offset = self.header.imagesOffset + (i * dyld_cache_image_info.SIZE)
-			self.images.append(dyld_cache_image_info(file, offset))
+		# get images
+		self.images: List[dyld_cache_image_info] = []
+		if self.headerContainsField("imagesCountWithSubCaches"):
+			imagesCount = self.header.imagesCountWithSubCaches
+			imagesOffset = self.header.imagesOffsetWithSubCaches
+			pass
+		else:
+			imagesCount = self.header.imagesCount
+			imagesOffset = self.header.imagesOffset
+			pass
+
+		for i in range(imagesCount):
+			offset = imagesOffset + (i * dyld_cache_image_info.SIZE)
+			self.images.append(dyld_cache_image_info(file.file, offset))
+			pass
+
+		self._subCaches: List[DyldContext] = []
 		pass
 
-	def convertAddr(self, vmaddr: int) -> int:
+	def convertAddr(self, vmaddr: int) -> Tuple[int, "DyldContext"]:
 		"""Convert a vmaddr to its file offset
 
 		Returns:
-			The file offset, but if not found, `-1`.
+			The file offset and the DyldContext, but if not found, `None`.
 		"""
 
-		for mapping in self.mappings:
+		for mapping, ctx in self.mappings:
 			lowBound = mapping.address
 			highBound = mapping.address + mapping.size
 
 			if vmaddr >= lowBound and vmaddr < highBound:
 				mappingOff = vmaddr - lowBound
-				return mapping.fileOffset + mappingOff
+				return mapping.fileOffset + mappingOff, ctx
 
 		# didn't find the address in any mappings...
 		return None
@@ -80,3 +91,21 @@ class DyldContext(FileContext):
 			return True
 		else:
 			return False
+
+	def hasSubCaches(self) -> bool:
+		"""Check if the dyld cache has sub caches.
+		"""
+
+		if self.headerContainsField("numSubCaches") and self.header.numSubCaches:
+			return True
+		else:
+			return False
+
+	def addSubCaches(self, subCacheFileCtxs: list[FileContext]) -> None:
+		cacheClass = type(self)
+		for fileCtx in subCacheFileCtxs:
+			subCache = cacheClass(fileCtx)
+			self._subCaches.append(subCache)
+			self.mappings.extend(subCache.mappings)
+			pass
+		pass

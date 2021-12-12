@@ -1,5 +1,7 @@
 import ctypes
-from typing import Any
+from typing import Type, TypeVar
+
+_T = TypeVar("_T", bound="Structure")
 
 
 class Structure(ctypes.LittleEndianStructure):
@@ -9,7 +11,7 @@ class Structure(ctypes.LittleEndianStructure):
 
 	_fileOff_: int
 
-	def __new__(cls, dataSource: bytes = None, offset: int = 0) -> Any:
+	def __new__(cls: Type[_T], dataSource: bytes = None, offset: int = 0) -> _T:
 		if dataSource:
 			instance = None
 			if memoryview(dataSource).readonly:
@@ -23,7 +25,7 @@ class Structure(ctypes.LittleEndianStructure):
 			return super().__new__(cls)
 
 	def __init__(self, dataSource: bytes = None, offset: int = 0) -> None:
-		pass
+		...
 
 	def __len__(self) -> int:
 		return ctypes.sizeof(self)

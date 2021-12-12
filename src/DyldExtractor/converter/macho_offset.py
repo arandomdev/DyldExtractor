@@ -1,4 +1,7 @@
+from dataclasses import dataclass
+
 from DyldExtractor.extraction_context import ExtractionContext
+from DyldExtractor.file_context import FileContext
 
 from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.macho.macho_structs import (
@@ -11,6 +14,18 @@ from DyldExtractor.macho.macho_structs import (
 
 
 _PAGE_SIZE = 0x4000
+
+
+@dataclass
+class WriteProcedure(object):
+	writeOffset: int
+	"""The offset to write to."""
+	readOffset: int
+	"""The offset to read from the fileCtx."""
+	size: int
+	"""The number of bytes to write."""
+	fileCtx: FileContext
+	"""The file to read from."""
 
 
 def _updateLinkEdit(
@@ -57,7 +72,7 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> None:
 		machoCtx: A writable MachOContext.
 
 	Returns:
-		The processed MachO file.
+		A list of WriteProcedures to aid in writing to a decached file.
 	"""
 
 	extractionCtx.statusBar.update(unit="Optimize Offsets")
@@ -67,7 +82,7 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> None:
 	machoCtx = extractionCtx.machoCtx
 
 	# first change all the offset fields and record the shifts
-	shiftProcedures = []  # Essentally a tuple with args to mmap.move
+	writeProcedures = []  # Essentally a tuple with args to mmap.move
 	dataHead = 0
 
 	for segname, segment in machoCtx.segments.items():
@@ -78,7 +93,11 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> None:
 			segment.seg.fileoff,  # src
 			segment.seg.filesize  # count
 		)
-		shiftProcedures.append(procedure)
+		# procedure = WriteProcedure(
+		# 	segment.seg.fileoff + shiftDelta,
+		# 	segment.seg.
+		# )
+		writeProcedures.append(procedure)
 
 		if segname == b"__LINKEDIT":
 			_updateLinkEdit(machoCtx, shiftDelta)
@@ -98,7 +117,7 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> None:
 	# Now we need to actually move the segments.
 	# 	We are moving the segments now because then we
 	# 	don't have to constantly "re-point" various structures.
-	for procedure in shiftProcedures:
+	for procedure in writeProcedures:
 		extractionCtx.statusBar.update(status="Moving Segments")
 
 		machoCtx.file.move(procedure[0], procedure[1], procedure[2])
