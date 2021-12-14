@@ -35,7 +35,7 @@ _SlideInfoMap = {
 
 
 @dataclass
-class MappingInfo(object):
+class _MappingInfo(object):
 	mapping: Union[dyld_cache_mapping_info, dyld_cache_mapping_and_slide_info]
 	slideInfo: Union[dyld_cache_slide_info2, dyld_cache_slide_info3]
 	dyldCtx: DyldContext
@@ -48,7 +48,7 @@ class _V2Rebaser(object):
 	def __init__(
 		self,
 		extractionCtx: ExtractionContext,
-		mappingInfo: MappingInfo
+		mappingInfo: _MappingInfo
 	) -> None:
 		super().__init__()
 
@@ -167,7 +167,7 @@ class _V3Rebaser(object):
 	def __init__(
 		self,
 		extractionCtx: ExtractionContext,
-		mappingInfo: MappingInfo
+		mappingInfo: _MappingInfo
 	) -> None:
 		super().__init__()
 
@@ -260,7 +260,7 @@ class _V3Rebaser(object):
 
 def _getMappingInfo(
 	extractionCtx: ExtractionContext
-) -> List[MappingInfo]:
+) -> List[_MappingInfo]:
 	"""Get pairs of mapping and slide info.
 	"""
 	dyldCtx = extractionCtx.dyldCtx
@@ -285,7 +285,7 @@ def _getMappingInfo(
 		# Assume that only the second mapping has slide info
 		mapping = dyldCtx.mappings[1][0]
 		slideInfo = _SlideInfoMap[slideInfoVer](dyldCtx.fileCtx.file, slideInfoOff)
-		mappingInfo.append(MappingInfo(mapping, slideInfo, dyldCtx))
+		mappingInfo.append(_MappingInfo(mapping, slideInfo, dyldCtx))
 		pass
 
 	else:
@@ -316,7 +316,7 @@ def _getMappingInfo(
 					context.fileCtx.file,
 					mapping.slideInfoFileOffset
 				)
-				mappingInfo.append(MappingInfo(mapping, slideInfo, context))
+				mappingInfo.append(_MappingInfo(mapping, slideInfo, context))
 				pass
 			pass
 		pass
@@ -324,7 +324,7 @@ def _getMappingInfo(
 	return mappingInfo
 
 
-StructureT = TypeVar("StructureT", bound=Structure)
+_T = TypeVar("_T", bound=Structure)
 
 
 class PointerSlider(object):
@@ -336,7 +336,7 @@ class PointerSlider(object):
 		super().__init__()
 
 		self._dyldCtx = extractionCtx.dyldCtx
-		self._mappingSlidePairs = _getMappingInfo(extractionCtx)
+		self._mappingInfo = _getMappingInfo(extractionCtx)
 
 	def slideAddress(self, address: int) -> int:
 		"""Slide and return the pointer at the address.
@@ -351,34 +351,22 @@ class PointerSlider(object):
 
 		if not (offset := self._dyldCtx.convertAddr(address)):
 			return None
+		offset, context = offset
 
-		return self.slideOffset(offset)
+		for info in self._mappingInfo:
+			mapping = info.mapping
+			mappingHighBound = mapping.address + mapping.size
 
-	def slideOffset(self, offset: int) -> int:
-		"""Slide and return the pointer at the file offset.
-
-		Args:
-			offset: The file offset.
-
-		Returns:
-			The slide version of the pointer. This will return None if
-			the pointer could not be slid.
-		"""
-
-		for pair in self._mappingSlidePairs:
-			mapping = pair[0]
-			mappingHighBound = mapping.fileOffset + mapping.size
-
-			if offset >= mapping.fileOffset and offset < mappingHighBound:
-				slideInfo = pair[1]
+			if address >= mapping.address and address < mappingHighBound:
+				slideInfo = info.slideInfo
 
 				# regular arm64 pointer
 				if slideInfo.version == 2:
-					return self._dyldCtx.readFormat(offset, "<Q")[0] & 0xfffffffff
+					return context.fileCtx.readFormat("<Q", offset)[0] & 0xfffffffff
 
 				# arm64e pointer
 				elif slideInfo.version == 3:
-					ptrInfo = dyld_cache_slide_pointer3(self._dyldCtx.file, offset)
+					ptrInfo = dyld_cache_slide_pointer3(context.fileCtx.file, offset)
 					if ptrInfo.auth.authenticated:
 						newValue = ptrInfo.auth.offsetFromSharedCacheBase
 						return newValue + slideInfo.auth_value_add
@@ -396,8 +384,8 @@ class PointerSlider(object):
 	def slideStruct(
 		self,
 		address: int,
-		structDef: Type[StructureT]
-	) -> StructureT:
+		structDef: Type[_T]
+	) -> _T:
 		"""Read and slide a structure at the address.
 
 		This will use the _pointers_ class property to
@@ -412,13 +400,13 @@ class PointerSlider(object):
 			The filled and slid structure.
 		"""
 
-		structOff = self._dyldCtx.convertAddr(address)
-		structData = structDef(self._dyldCtx.file, structOff)
+		structOff, context = self._dyldCtx.convertAddr(address)
+		structData = structDef(context.fileCtx.file, structOff)
 
 		if ptrNames := getattr(structData, "_pointers_", None):
 			for ptrName in ptrNames:
-				ptrOff = structOff + getattr(structDef, ptrName).offset
-				slidPtr = self.slideOffset(ptrOff)
+				ptrAddr = address + getattr(structDef, ptrName).offset
+				slidPtr = self.slideAddress(ptrAddr)
 				setattr(structData, ptrName, slidPtr)
 				pass
 			pass
