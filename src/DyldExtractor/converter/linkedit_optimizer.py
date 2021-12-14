@@ -514,11 +514,7 @@ def optimizeLinkedit(extractionCtx: ExtractionContext) -> None:
 	necessary data.
 
 	Args:
-		dyldCtx: The source dyld context.
-		machoCtx: A writable MachO file to optimize.
-
-	Returns:
-		The optimized MachO file.
+		extractionCtx: The extraction context.
 	"""
 
 	extractionCtx.statusBar.update(unit="Optimize Linkedit")
