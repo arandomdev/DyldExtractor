@@ -34,7 +34,7 @@ class FileContext:
 
 		return self.file[offset:nullIndex + 1]
 
-	def readFormat(self, offset: int, format: str) -> Any:
+	def readFormat(self, format: str, offset: int) -> Any:
 		"""Read a formatted value at the offset.
 
 		Args:

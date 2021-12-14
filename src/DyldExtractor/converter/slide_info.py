@@ -1,4 +1,5 @@
 import struct
+from dataclasses import dataclass
 from typing import (
 	Type,
 	TypeVar,
@@ -8,6 +9,7 @@ from typing import (
 )
 
 from DyldExtractor.extraction_context import ExtractionContext
+from DyldExtractor.file_context import FileContext
 from DyldExtractor.structure import Structure
 
 from DyldExtractor.dyld.dyld_context import DyldContext
@@ -32,23 +34,31 @@ _SlideInfoMap = {
 }
 
 
+@dataclass
+class MappingInfo(object):
+	mapping: Union[dyld_cache_mapping_info, dyld_cache_mapping_and_slide_info]
+	slideInfo: Union[dyld_cache_slide_info2, dyld_cache_slide_info3]
+	dyldCtx: DyldContext
+	"""The context that the mapping info belongs to."""
+	pass
+
+
 class _V2Rebaser(object):
 
 	def __init__(
 		self,
 		extractionCtx: ExtractionContext,
-		mapping: dyld_cache_mapping_info,
-		slideInfo: dyld_cache_slide_info2
+		mappingInfo: MappingInfo
 	) -> None:
 		super().__init__()
 
 		self.statusBar = extractionCtx.statusBar
-		self.dyldCtx = extractionCtx.dyldCtx
-		self.machoCtx = extractionCtx.machoCtx
 		self.logger = extractionCtx.logger
+		self.machoCtx = extractionCtx.machoCtx
 
-		self.mapping = mapping
-		self.slideInfo = slideInfo
+		self.dyldCtx = mappingInfo.dyldCtx
+		self.mapping = mappingInfo.mapping
+		self.slideInfo = mappingInfo.slideInfo
 
 	def run(self) -> None:
 		"""Process all slide info.
@@ -57,9 +67,11 @@ class _V2Rebaser(object):
 		self.statusBar.update(unit="Slide Info Rebaser")
 
 		# get pageStarts, an array of uint_16
-		pageStartOff = self.slideInfo._fileOff_ + self.slideInfo.page_starts_offset
-		self.dyldCtx.file.seek(pageStartOff)
-		pageStarts = self.dyldCtx.file.read(self.slideInfo.page_starts_count * 2)
+		pageStartsOff = self.slideInfo._fileOff_ + self.slideInfo.page_starts_offset
+		pageStarts = self.dyldCtx.fileCtx.getBytes(
+			pageStartsOff,
+			self.slideInfo.page_starts_count * 2
+		)
 		pageStarts = [page[0] for page in struct.iter_unpack("<H", pageStarts)]
 
 		for segment in self.machoCtx.segmentsI:
@@ -78,6 +90,8 @@ class _V2Rebaser(object):
 			and segment.vmaddr < self.mapping.address + self.mapping.size
 		):
 			return
+
+		machoFile = self.machoCtx.fileForAddr(segment.vmaddr)
 
 		# get the indices of relevent pageStarts
 		dataStart = self.mapping.address
@@ -104,12 +118,17 @@ class _V2Rebaser(object):
 				pageOff = (i * pageSize) + self.mapping.fileOffset
 
 				# The page offset are 32bit jumps
-				self._rebasePage(pageOff, page * 4)
+				self._rebasePage(machoFile, pageOff, page * 4)
 
 				self.statusBar.update(status="Rebasing Pages")
 		pass
 
-	def _rebasePage(self, pageStart: int, pageOffset: int) -> None:
+	def _rebasePage(
+		self,
+		machoFile: FileContext,
+		pageStart: int,
+		pageOffset: int
+	) -> None:
 		"""Process the slide info for a page.
 
 		Args:
@@ -130,14 +149,14 @@ class _V2Rebaser(object):
 		while delta != 0:
 			loc = pageStart + pageOffset
 
-			rawValue = self.dyldCtx.readFormat(loc, "<Q")[0]
+			rawValue = self.dyldCtx.fileCtx.readFormat("<Q", loc)[0]
 			delta = (rawValue & deltaMask) >> deltaShift
 
 			newValue = rawValue & valueMask
 			if valueMask != 0:
 				newValue += valueAdd
 
-			self.machoCtx.file[loc:loc + 8] = struct.pack("<Q", newValue)
+			machoFile.writeBytes(loc, struct.pack("<Q", newValue))
 			pageOffset += delta
 		pass
 	pass
@@ -148,23 +167,25 @@ class _V3Rebaser(object):
 	def __init__(
 		self,
 		extractionCtx: ExtractionContext,
-		mapping: dyld_cache_mapping_info,
-		slideInfo: dyld_cache_slide_info3
+		mappingInfo: MappingInfo
 	) -> None:
 		super().__init__()
 
 		self.statusBar = extractionCtx.statusBar
-		self.dyldCtx = extractionCtx.dyldCtx
 		self.machoCtx = extractionCtx.machoCtx
-		self.mapping = mapping
-		self.slideInfo = slideInfo
+
+		self.dyldCtx = mappingInfo.dyldCtx
+		self.mapping = mappingInfo.mapping
+		self.slideInfo = mappingInfo.slideInfo
 
 	def run(self) -> None:
 		self.statusBar.update(unit="Slide Info Rebaser")
 
 		pageStartsOff = self.slideInfo._fileOff_ + len(self.slideInfo)
-		self.dyldCtx.file.seek(pageStartsOff)
-		pageStarts = self.dyldCtx.file.read(self.slideInfo.page_starts_count * 2)
+		pageStarts = self.dyldCtx.fileCtx.getBytes(
+			pageStartsOff,
+			self.slideInfo.page_starts_count * 2
+		)
 		pageStarts = [page[0] for page in struct.iter_unpack("<H", pageStarts)]
 
 		for segment in self.machoCtx.segmentsI:
@@ -181,6 +202,8 @@ class _V3Rebaser(object):
 			and segment.vmaddr < self.mapping.address + self.mapping.size
 		):
 			return
+
+		machoFile = self.machoCtx.fileForAddr(segment.vmaddr)
 
 		# get the indices of relevent pageStarts
 		dataStart = self.mapping.address
@@ -200,17 +223,22 @@ class _V3Rebaser(object):
 				continue
 			else:
 				pageOff = (i * pageSize) + self.mapping.fileOffset
-				self._rebasePage(pageOff, page)
+				self._rebasePage(machoFile, pageOff, page)
 
 				self.statusBar.update(status="Rebasing Pages")
 		pass
 
-	def _rebasePage(self, pageOffset, delta) -> None:
+	def _rebasePage(
+		self,
+		machoFile: FileContext,
+		pageOffset: int,
+		delta: int
+	) -> None:
 		locOff = pageOffset
 
 		while True:
 			locOff += delta
-			locInfo = dyld_cache_slide_pointer3(self.dyldCtx.file, locOff)
+			locInfo = dyld_cache_slide_pointer3(self.dyldCtx.fileCtx.file, locOff)
 
 			# It appears the delta encoded in the pointers are 64bit jumps...
 			delta = locInfo.plain.offsetToNextPointer * 8
@@ -224,59 +252,76 @@ class _V3Rebaser(object):
 				bottom43Bits = value51 & 0x000007FFFFFFFFFF
 				newValue = (top8Bits << 13) | bottom43Bits
 
-			self.machoCtx.file[locOff:locOff + 8] = struct.pack("<Q", newValue)
+			machoFile.writeBytes(locOff, struct.pack("<Q", newValue))
 
 			if delta == 0:
 				break
 
 
-def _getMappingSlidePairs(
+def _getMappingInfo(
 	extractionCtx: ExtractionContext
-) -> List[Tuple[Union[dyld_cache_mapping_info, dyld_cache_slide_info2]]]:
+) -> List[MappingInfo]:
+	"""Get pairs of mapping and slide info.
+	"""
 	dyldCtx = extractionCtx.dyldCtx
 	logger = extractionCtx.logger
 
-	mappingSlidePairs = []
+	mappingInfo = []
 
 	if dyldCtx.header.slideInfoOffsetUnused:
+		# Assume the legacy case with no sub caches, and only one slide info
+		if dyldCtx.hasSubCaches():
+			logger.error("Legacy slide info with sub caches.")
+			pass
+
 		# the version is encoded as the first uint32 field
 		slideInfoOff = dyldCtx.header.slideInfoOffsetUnused
-		dyldCtx.file.seek(slideInfoOff)
-		slideInfoVersion = struct.unpack("<I", dyldCtx.file.read(4))[0]
+		slideInfoVer = dyldCtx.fileCtx.readFormat(slideInfoOff, "<I")[0]
 
-		if slideInfoVersion not in _SlideInfoMap:
-			logger.error("Unknown slide info version: " + slideInfoVersion)
+		if slideInfoVer not in _SlideInfoMap:
+			logger.error("Unknown slide info version: " + slideInfoVer)
 			return None
 
 		# Assume that only the second mapping has slide info
-		mapping = dyldCtx.mappings[1]
-		slideInfo = _SlideInfoMap[slideInfoVersion](dyldCtx.file, slideInfoOff)
-		mappingSlidePairs.append((mapping, slideInfo))
+		mapping = dyldCtx.mappings[1][0]
+		slideInfo = _SlideInfoMap[slideInfoVer](dyldCtx.fileCtx.file, slideInfoOff)
+		mappingInfo.append(MappingInfo(mapping, slideInfo, dyldCtx))
+		pass
 
-	elif dyldCtx.headerContainsField("mappingWithSlideOffset"):
-		# slide info is now in different location
-		for i in range(dyldCtx.header.mappingWithSlideCount):
-			mappingOff = dyldCtx.header.mappingWithSlideOffset
-			mappingOff += i * dyld_cache_mapping_and_slide_info.SIZE
+	else:
+		for mapping, context in dyldCtx.mappings:
+			if not context.headerContainsField("mappingWithSlideOffset"):
+				logger.error("Unable to pair mapping with slide info.")
+				continue
 
-			mapping = dyld_cache_mapping_and_slide_info(dyldCtx.file, mappingOff)
+			# Get the expanded mapping info
+			mapI = context.mappings.index((mapping, context))
+			mapOff = (
+				context.header.mappingWithSlideOffset
+				+ mapI * dyld_cache_mapping_and_slide_info.SIZE
+			)
+
+			mapping = dyld_cache_mapping_and_slide_info(context.fileCtx.file, mapOff)
 			if mapping.slideInfoFileOffset:
-				dyldCtx.file.seek(mapping.slideInfoFileOffset)
-				slideInfoVersion = struct.unpack("<I", dyldCtx.file.read(4))[0]
+				slideInfoVer = context.fileCtx.readFormat(
+					"<I",
+					mapping.slideInfoFileOffset
+				)[0]
 
-				if slideInfoVersion not in _SlideInfoMap:
-					logger.error(f"Unknown slide info version: {slideInfoVersion}")
+				if slideInfoVer not in _SlideInfoMap:
+					logger.error("Unknown slide info version: " + slideInfoVer)
 					continue
 
-				slideInfoStruct = _SlideInfoMap[slideInfoVersion]
-				slideInfo = slideInfoStruct(dyldCtx.file, mapping.slideInfoFileOffset)
+				slideInfo = _SlideInfoMap[slideInfoVer](
+					context.fileCtx.file,
+					mapping.slideInfoFileOffset
+				)
+				mappingInfo.append(MappingInfo(mapping, slideInfo, context))
+				pass
+			pass
+		pass
 
-				mappingSlidePairs.append((mapping, slideInfo))
-	else:
-		logger.error("Unable to get slide info!")
-		return None
-
-	return mappingSlidePairs
+	return mappingInfo
 
 
 StructureT = TypeVar("StructureT", bound=Structure)
@@ -291,7 +336,7 @@ class PointerSlider(object):
 		super().__init__()
 
 		self._dyldCtx = extractionCtx.dyldCtx
-		self._mappingSlidePairs = _getMappingSlidePairs(extractionCtx)
+		self._mappingSlidePairs = _getMappingInfo(extractionCtx)
 
 	def slideAddress(self, address: int) -> int:
 		"""Slide and return the pointer at the address.
@@ -401,15 +446,15 @@ def processSlideInfo(extractionCtx: ExtractionContext) -> None:
 	logger = extractionCtx.logger
 
 	# get a list of mapping and slide info
-	mappingSlidePairs = _getMappingSlidePairs(extractionCtx)
-	if not mappingSlidePairs:
+	mappingInfo = _getMappingInfo(extractionCtx)
+	if not mappingInfo:
 		return
 
 	# Process each pair
-	for pair in mappingSlidePairs:
-		if pair[1].version == 2:
-			_V2Rebaser(extractionCtx, pair[0], pair[1]).run()
-		elif pair[1].version == 3:
-			_V3Rebaser(extractionCtx, pair[0], pair[1]).run()
+	for info in mappingInfo:
+		if info.slideInfo.version == 2:
+			_V2Rebaser(extractionCtx, info).run()
+		elif info.slideInfo.version == 3:
+			_V3Rebaser(extractionCtx, info).run()
 		else:
 			logger.error("Unknown slide version.")
