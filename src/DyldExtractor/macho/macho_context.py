@@ -4,6 +4,8 @@ from typing import Union, List, Dict, Tuple
 
 from DyldExtractor.file_context import FileContext
 
+from DyldExtractor.dyld.dyld_structs import dyld_cache_mapping_info
+
 from DyldExtractor.macho.segment_context import SegmentContext
 from DyldExtractor.macho.macho_structs import (
 	LoadCommandMap,
@@ -42,6 +44,7 @@ class MachOContext(object):
 		self.fileOffset = offset
 
 		self.header = mach_header_64(fileCtx.file, offset)
+		self._mappings: List[Tuple[dyld_cache_mapping_info, FileContext]] = []
 
 		# check to make sure the MachO file is 64 bit
 		magic = self.header.magic
@@ -134,4 +137,45 @@ class MachOContext(object):
 
 				self.segments[command.segname] = segCtx
 				self.segmentsI.append(segCtx)
+				pass
+			pass
 		pass
+
+	def addSubfiles(
+		self,
+		mainFileMap: dyld_cache_mapping_info,
+		subFilesAndMaps: List[Tuple[dyld_cache_mapping_info, FileContext]]
+	) -> None:
+		"""Add sub files.
+
+		Used when the data to describe a MachO file is split into multiple
+		files, each file needs to have mapping info.
+
+		Args:
+			mainFileMap: Mapping info for the file that contains the header.
+			subFilesAndMaps: A list of tuples that contain the sub file context
+				and the mapping info.
+		"""
+		self._mappings.append((mainFileMap, self.fileCtx))
+		self._mappings.extend(subFilesAndMaps)
+		pass
+
+	def fileForAddr(self, vmaddr: int) -> FileContext:
+		"""Get the file context that contains the address.
+
+		If there are no sub files added, this just returns the main
+		file context. If the file cannot be found, this returns None.
+		"""
+
+		if not self._mappings:
+			return self.fileCtx
+
+		for mapping, ctx in self._mappings:
+			lowBound = mapping.address
+			highBound = mapping.address + mapping.size
+
+			if vmaddr >= lowBound and vmaddr < highBound:
+				return ctx
+
+		# didn't find the address in any mappings...
+		return None

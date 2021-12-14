@@ -4,7 +4,6 @@ import progressbar
 import argparse
 import pathlib
 import logging
-import mmap
 import os
 import sys
 from typing import List, BinaryIO, Tuple
@@ -145,8 +144,20 @@ def _extractImage(
 			pass
 
 		# get a a writable copy of the MachOContext
-		machoOffset, machoFile = dyldCtx.convertAddr(image.address)
-		machoCtx = MachOContext(machoFile.fileCtx, machoOffset)
+		machoOffset, context = dyldCtx.convertAddr(image.address)
+		machoCtx = MachOContext(context.fileCtx.makeCopy(copyMode=True), machoOffset)
+
+		# Add sub caches if necessary
+		if dyldCtx.hasSubCaches():
+			mappings = dyldCtx.mappings
+			mainFileMap = next(
+				(mapping[0] for mapping in mappings if mapping[1] == context)
+			)
+			machoCtx.addSubfiles(
+				mainFileMap,
+				((m, ctx.fileCtx.makeCopy(copyMode=True)) for m, ctx in mappings)
+			)
+			pass
 
 		extractionCtx = ExtractionContext(dyldCtx, machoCtx, statusBar, logger)
 
@@ -155,20 +166,18 @@ def _extractImage(
 		# stub_fixer.fixStubs(extractionCtx)
 		# objc_fixer.fixObjC(extractionCtx)
 
-		macho_offset.optimizeOffsets(extractionCtx)
+		writeProcedures = macho_offset.optimizeOffsets(extractionCtx)
 
 		# Write the MachO file
 		with open(outputPath, "wb") as outFile:
 			statusBar.update(unit="Extractor", status="Writing file")
 
-			newMachoCtx = extractionCtx.machoCtx
-
-			# get the size of the file
-			linkEditSeg = newMachoCtx.segments[b"__LINKEDIT"].seg
-			fileSize = linkEditSeg.fileoff + linkEditSeg.filesize
-
-			newMachoCtx.file.seek(0)
-			outFile.write(newMachoCtx.file.read(fileSize))
+			for procedure in writeProcedures:
+				outFile.seek(procedure.writeOffset)
+				outFile.write(
+					procedure.fileCtx.getBytes(procedure.readOffset, procedure.size)
+				)
+				pass
 
 		statusBar.update(unit="Extractor", status="Done")
 

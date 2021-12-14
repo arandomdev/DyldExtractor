@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List
 
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.file_context import FileContext
@@ -62,7 +63,7 @@ def _updateLinkEdit(
 			lc.init_address += shiftDelta if lc.init_address else 0
 
 
-def optimizeOffsets(extractionCtx: ExtractionContext) -> None:
+def optimizeOffsets(extractionCtx: ExtractionContext) -> List[WriteProcedure]:
 	"""Adjusts file offsets.
 
 		MachO files in the Dyld Shared Cache are split up, which causes
@@ -80,23 +81,21 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> None:
 	# The data in a MachO are defined by the segment load commands,
 	# This includes the LinkEdit and MachO header
 	machoCtx = extractionCtx.machoCtx
+	dyldCtx = extractionCtx.dyldCtx
 
-	# first change all the offset fields and record the shifts
-	writeProcedures = []  # Essentally a tuple with args to mmap.move
+	# first change all the offset fields and record the writes
+	writeProcedures = []
 	dataHead = 0
 
 	for segname, segment in machoCtx.segments.items():
 		shiftDelta = dataHead - segment.seg.fileoff
 
-		procedure = (
-			segment.seg.fileoff + shiftDelta,  # dest
-			segment.seg.fileoff,  # src
-			segment.seg.filesize  # count
+		procedure = WriteProcedure(
+			segment.seg.fileoff + shiftDelta,
+			dyldCtx.convertAddr(segment.seg.vmaddr)[0],
+			segment.seg.filesize,
+			machoCtx.fileForAddr(segment.seg.vmaddr)
 		)
-		# procedure = WriteProcedure(
-		# 	segment.seg.fileoff + shiftDelta,
-		# 	segment.seg.
-		# )
 		writeProcedures.append(procedure)
 
 		if segname == b"__LINKEDIT":
@@ -114,14 +113,4 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> None:
 		dataHead += _PAGE_SIZE - (dataHead % _PAGE_SIZE)
 		pass
 
-	# Now we need to actually move the segments.
-	# 	We are moving the segments now because then we
-	# 	don't have to constantly "re-point" various structures.
-	for procedure in writeProcedures:
-		extractionCtx.statusBar.update(status="Moving Segments")
-
-		machoCtx.file.move(procedure[0], procedure[1], procedure[2])
-		pass
-
-	# re-create the MachOContext so it reflects the new offsets
-	extractionCtx.machoCtx = MachOContext(machoCtx.file, 0)
+	return writeProcedures

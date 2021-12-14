@@ -73,5 +73,5 @@ class FileContext:
 		self.file.write(data)
 		pass
 
-	def makeCopy(self) -> "FileContext":
-		return type(self)(self.fileObject, copyMode=True)
+	def makeCopy(self, copyMode: bool = False) -> "FileContext":
+		return type(self)(self.fileObject, copyMode=copyMode)
