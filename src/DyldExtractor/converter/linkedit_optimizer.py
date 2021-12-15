@@ -76,6 +76,10 @@ class _LinkeditOptimizer(object):
 		self.statusBar = extractionCtx.statusBar
 		self.logger = extractionCtx.logger
 
+		self.linkeditFile = self.machoCtx.fileForAddr(
+			self.machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
+		)
+
 		self.symTabCmd: symtab_command = None
 		self.dynSymTabCmd: dysymtab_command = None
 		self.dyldInfo: dyld_info_command = None
@@ -134,7 +138,10 @@ class _LinkeditOptimizer(object):
 
 		size = self.dyldInfo.weak_bind_size
 		if size:
-			weakBindingInfo = self.machoCtx.getBytes(self.dyldInfo.weak_bind_off, size)
+			weakBindingInfo = self.linkeditFile.getBytes(
+				self.dyldInfo.weak_bind_off,
+				size
+			)
 
 			self.newWeakBindingInfoOffset = len(newLinkedit)
 			newLinkedit.extend(weakBindingInfo)
@@ -156,7 +163,7 @@ class _LinkeditOptimizer(object):
 			exportSize = self.dyldInfo.export_size
 
 		if exportSize:
-			exportInfo = self.machoCtx.getBytes(exportOff, exportSize)
+			exportInfo = self.linkeditFile.getBytes(exportOff, exportSize)
 
 			self.newExportInfoOffset = len(newLinkedit)
 			newLinkedit.extend(exportInfo)
@@ -172,7 +179,7 @@ class _LinkeditOptimizer(object):
 
 		size = self.dyldInfo.bind_size
 		if size:
-			bindingInfo = self.machoCtx.getBytes(self.dyldInfo.bind_off, size)
+			bindingInfo = self.linkeditFile.getBytes(self.dyldInfo.bind_off, size)
 
 			self.newBindingInfoOffset = len(newLinkedit)
 			newLinkedit.extend(bindingInfo)
@@ -188,7 +195,10 @@ class _LinkeditOptimizer(object):
 
 		size = self.dyldInfo.lazy_bind_size
 		if size:
-			lazyBindingInfo = self.machoCtx.getBytes(self.dyldInfo.lazy_bind_off, size)
+			lazyBindingInfo = self.linkeditFile.getBytes(
+				self.dyldInfo.lazy_bind_off,
+				size
+			)
 
 			self.newLazyBindingInfoOffset = len(newLinkedit)
 			newLinkedit.extend(lazyBindingInfo)
@@ -204,9 +214,10 @@ class _LinkeditOptimizer(object):
 	def copyLocalSymbols(self, newLinkedit: bytearray) -> None:
 		self.statusBar.update(status="Copy Local Symbols")
 
+		symbolsCache = self.dyldCtx.getSymbolsCache()
 		localSymbolsInfo = dyld_cache_local_symbols_info(
-			self.dyldCtx.file,
-			self.dyldCtx.header.localSymbolsOffset
+			symbolsCache.fileCtx.file,
+			symbolsCache.header.localSymbolsOffset
 		)
 
 		localSymbolsEntriesInfo = None
@@ -214,7 +225,7 @@ class _LinkeditOptimizer(object):
 			entryOff = (i * dyld_cache_local_symbols_entry.SIZE)
 			entryOff += localSymbolsInfo._fileOff_ + localSymbolsInfo.entriesOffset
 
-			entry = dyld_cache_local_symbols_entry(self.dyldCtx.file, entryOff)
+			entry = dyld_cache_local_symbols_entry(symbolsCache.fileCtx.file, entryOff)
 			if entry.dylibOffset == self.machoCtx.fileOffset:
 				localSymbolsEntriesInfo = entry
 				break
@@ -241,7 +252,7 @@ class _LinkeditOptimizer(object):
 
 		for offset in range(entriesStart, entriesEnd, nlist_64.SIZE):
 			symbolEnt = nlist_64(self.dyldCtx.file, offset)
-			name = self.dyldCtx.readString(symbolStrOff + symbolEnt.n_strx)
+			name = symbolsCache.fileCtx.readString(symbolStrOff + symbolEnt.n_strx)
 
 			# copy data
 			self.newLocalSymbolCount += 1

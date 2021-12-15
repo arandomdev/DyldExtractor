@@ -162,7 +162,7 @@ def _extractImage(
 		extractionCtx = ExtractionContext(dyldCtx, machoCtx, statusBar, logger)
 
 		slide_info.processSlideInfo(extractionCtx)
-		# linkedit_optimizer.optimizeLinkedit(extractionCtx)
+		linkedit_optimizer.optimizeLinkedit(extractionCtx)
 		# stub_fixer.fixStubs(extractionCtx)
 		# objc_fixer.fixObjC(extractionCtx)
 

@@ -109,3 +109,21 @@ class DyldContext(object):
 			self.mappings.extend(subCache.mappings)
 			pass
 		pass
+
+	def getSymbolsCache(self) -> "DyldContext":
+		"""Get the .symbols cache.
+
+		Try to find the .symbols cache by matching uuids.
+		If there are no sub caches, this just returns itself.
+		Or None if the .symbols cache cannot be found.
+		"""
+
+		if not self._subCaches:
+			return self
+
+		for cache in self._subCaches:
+			if self.header.symbolSubCacheUUID == cache.header.uuid:
+				return cache
+			pass
+
+		return None
