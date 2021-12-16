@@ -365,6 +365,23 @@ class dyld_cache_local_symbols_entry(Structure):
 	]
 
 
+class dyld_cache_local_symbols_entry2(Structure):
+
+	SIZE = 16
+
+	dylibOffset: int 		# offset in cache file of start of dylib
+	unknown: int 			# Unknown field, currently 0
+	nlistStartIndex: int 	# start index of locals for this dylib
+	nlistCount: int 		# number of local symbols for this dylib
+
+	_fields_ = [
+		("dylibOffset", c_uint32),
+		("unknown", c_uint32),
+		("nlistStartIndex", c_uint32),
+		("nlistCount", c_uint32),
+	]
+
+
 class dyld_cache_patch_info(Structure):
 
 	patchTableArrayAddr: int  		# (unslid) address of array for dyld_cache_image_patches for each image

@@ -122,7 +122,7 @@ class DyldContext(object):
 			return self
 
 		for cache in self._subCaches:
-			if self.header.symbolSubCacheUUID == cache.header.uuid:
+			if bytes(self.header.symbolSubCacheUUID) == bytes(cache.header.uuid):
 				return cache
 			pass
 

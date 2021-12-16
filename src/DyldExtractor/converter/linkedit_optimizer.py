@@ -1,11 +1,14 @@
 import struct
+from typing import Union, Type
 
 from DyldExtractor.extraction_context import ExtractionContext
 
 from DyldExtractor.dyld.dyld_structs import (
 	dyld_cache_local_symbols_info,
-	dyld_cache_local_symbols_entry
+	dyld_cache_local_symbols_entry,
+	dyld_cache_local_symbols_entry2
 )
+from DyldExtractor.file_context import FileContext
 
 from DyldExtractor.macho.macho_constants import *
 from DyldExtractor.macho.macho_structs import (
@@ -211,6 +214,39 @@ class _LinkeditOptimizer(object):
 		self.newSymbolTableOffset = len(newLinkedit)
 		pass
 
+	def getLocalSymsEntryStruct(
+		self,
+		symbolsCache: FileContext,
+		symbolsInfo: dyld_cache_local_symbols_info
+	) -> Union[
+		Type[dyld_cache_local_symbols_entry],
+		Type[dyld_cache_local_symbols_entry2]
+	]:
+		"""Get the correct struct for the local symbol entries.
+
+		If the struct version could not be found,
+		return None.
+		"""
+
+		# get the offset to the first image, and to the
+		# second image. Assumes that they are next to each other.
+		image1 = self.dyldCtx.convertAddr(self.dyldCtx.images[0].address)[0]
+		image1 = struct.pack("<I", image1)
+		image2 = self.dyldCtx.convertAddr(self.dyldCtx.images[1].address)[0]
+		image2 = struct.pack("<I", image2)
+
+		entriesOff = symbolsInfo._fileOff_ + symbolsInfo.entriesOffset
+		image1Off = symbolsCache.file.find(image1, entriesOff)
+		image2Off = symbolsCache.file.find(image2, entriesOff)
+
+		structSize = image2Off - image1Off
+		if structSize == dyld_cache_local_symbols_entry.SIZE:
+			return dyld_cache_local_symbols_entry
+		elif structSize == dyld_cache_local_symbols_entry2.SIZE:
+			return dyld_cache_local_symbols_entry2
+		else:
+			return None
+
 	def copyLocalSymbols(self, newLinkedit: bytearray) -> None:
 		self.statusBar.update(status="Copy Local Symbols")
 
@@ -220,13 +256,26 @@ class _LinkeditOptimizer(object):
 			symbolsCache.header.localSymbolsOffset
 		)
 
+		entryStruct = self.getLocalSymsEntryStruct(
+			symbolsCache.fileCtx,
+			localSymbolsInfo
+		)
+		if not entryStruct:
+			self.logger.error("Unable to get local symbol entries structure.")
+			return
+
+		dylibOffset = (
+			self.machoCtx.segments[b"__TEXT"].seg.vmaddr
+			- self.dyldCtx.header.sharedRegionStart
+		)
+
 		localSymbolsEntriesInfo = None
 		for i in range(localSymbolsInfo.entriesCount):
-			entryOff = (i * dyld_cache_local_symbols_entry.SIZE)
+			entryOff = (i * entryStruct.SIZE)
 			entryOff += localSymbolsInfo._fileOff_ + localSymbolsInfo.entriesOffset
 
-			entry = dyld_cache_local_symbols_entry(symbolsCache.fileCtx.file, entryOff)
-			if entry.dylibOffset == self.machoCtx.fileOffset:
+			entry = entryStruct(symbolsCache.fileCtx.file, entryOff)
+			if entry.dylibOffset == dylibOffset:
 				localSymbolsEntriesInfo = entry
 				break
 
@@ -251,7 +300,7 @@ class _LinkeditOptimizer(object):
 		symbolStrOff = localSymbolsInfo._fileOff_ + localSymbolsInfo.stringsOffset
 
 		for offset in range(entriesStart, entriesEnd, nlist_64.SIZE):
-			symbolEnt = nlist_64(self.dyldCtx.file, offset)
+			symbolEnt = nlist_64(symbolsCache.fileCtx.file, offset)
 			name = symbolsCache.fileCtx.readString(symbolStrOff + symbolEnt.n_strx)
 
 			# copy data
@@ -282,10 +331,10 @@ class _LinkeditOptimizer(object):
 
 		for entryIndex in range(entriesStart, entriesEnd):
 			entryOff = self.symTabCmd.symoff + (entryIndex * nlist_64.SIZE)
-			entry = nlist_64(self.dyldCtx.file, entryOff)
+			entry = nlist_64(self.linkeditFile.file, entryOff)
 
 			nameOff = symbolStrOff + entry.n_strx
-			name = self.dyldCtx.readString(nameOff)
+			name = self.linkeditFile.readString(nameOff)
 
 			# update variables and copy
 			self.oldToNewSymbolIndexes[entryIndex] = self.symbolCtx.symbolsSize
@@ -317,10 +366,10 @@ class _LinkeditOptimizer(object):
 
 		for entryIndex in range(entriesStart, entriesEnd):
 			entryOff = self.symTabCmd.symoff + (entryIndex * nlist_64.SIZE)
-			entry = nlist_64(self.dyldCtx.file, entryOff)
+			entry = nlist_64(self.linkeditFile.file, entryOff)
 
 			nameOff = symbolStrOff + entry.n_strx
-			name = self.dyldCtx.readString(nameOff)
+			name = self.linkeditFile.readString(nameOff)
 
 			# update variables and copy
 			self.oldToNewSymbolIndexes[entryIndex] = self.symbolCtx.symbolsSize
@@ -357,7 +406,7 @@ class _LinkeditOptimizer(object):
 		indirectStart = self.dynSymTabCmd.indirectsymoff
 		indirectEnd = indirectStart + (self.dynSymTabCmd.nindirectsyms * 4)
 		for offset in range(indirectStart, indirectEnd, 4):
-			symbolIndex = self.dyldCtx.getBytes(offset, 4)
+			symbolIndex = self.linkeditFile.getBytes(offset, 4)
 			if symbolIndex == b"\x00\x00\x00\x00":
 				self.redactedSymbolCount += 1
 
@@ -385,7 +434,10 @@ class _LinkeditOptimizer(object):
 		self.newFunctionStartsOffset = len(newLinkedit)
 
 		size = self.functionStartsCmd.datasize
-		functionStarts = self.machoCtx.getBytes(self.functionStartsCmd.dataoff, size)
+		functionStarts = self.linkeditFile.getBytes(
+			self.functionStartsCmd.dataoff,
+			size
+		)
 		newLinkedit.extend(functionStarts)
 
 		self.statusBar.update()
@@ -400,7 +452,7 @@ class _LinkeditOptimizer(object):
 		self.newDataInCodeOffset = len(newLinkedit)
 
 		size = self.dataInCodeCmd.datasize
-		dataInCode = self.machoCtx.getBytes(self.dataInCodeCmd.dataoff, size)
+		dataInCode = self.linkeditFile.getBytes(self.dataInCodeCmd.dataoff, size)
 		newLinkedit.extend(dataInCode)
 
 		self.statusBar.update()
@@ -421,7 +473,7 @@ class _LinkeditOptimizer(object):
 
 		for offset in range(self.dynSymTabCmd.indirectsymoff, entriesEnd, 4):
 			# Each entry is a 32bit index into the symbol table
-			symbol = self.dyldCtx.getBytes(offset, 4)
+			symbol = self.linkeditFile.getBytes(offset, 4)
 			symbolIndex = struct.unpack("<I", symbol)[0]
 
 			if (
@@ -565,10 +617,11 @@ def optimizeLinkedit(extractionCtx: ExtractionContext) -> None:
 		newLinkedit.extend(b"\x00" * 4)
 
 	# Set the new linkedit in the same location
-	machoCtx = extractionCtx.machoCtx
-	newLinkeditOff = machoCtx.segments[b"__LINKEDIT"].seg.fileoff
-	machoCtx.file.seek(newLinkeditOff)
-	machoCtx.file.write(newLinkedit)
+	newLinkeditOff = extractionCtx.machoCtx.segments[b"__LINKEDIT"].seg.fileoff
+	linkeditFile = extractionCtx.machoCtx.fileForAddr(
+		extractionCtx.machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
+	)
+	linkeditFile.writeBytes(newLinkeditOff, newLinkedit)
 
 	optimizer.updateLoadCommands(newLinkedit, newLinkeditOff)
 
