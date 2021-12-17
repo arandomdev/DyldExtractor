@@ -53,7 +53,7 @@ class _Symbolizer(object):
 		# create a map of image paths and their addresses
 		self._images: dict[bytes, int] = {}
 		for image in self._dyldCtx.images:
-			imagePath = self._dyldCtx.readString(image.pathFileOffset)
+			imagePath = self._dyldCtx.fileCtx.readString(image.pathFileOffset)
 			self._images[imagePath] = image.address
 			pass
 
@@ -166,14 +166,16 @@ class _Symbolizer(object):
 		"""
 
 		dylibPathOff = dylib._fileOff_ + dylib.dylib.name.offset
-		dylibPath = self._dyldCtx.readString(dylibPathOff)
+		dylibPath = self._machoCtx.fileCtx.readString(dylibPathOff)
 		if dylibPath not in self._images:
 			self._logger.warning(f"Unable to find dependency: {dylibPath}")
 			return None
 
 		imageAddr = self._images[dylibPath]
-		imageOff = self._dyldCtx.convertAddr(imageAddr)
-		context = MachOContext(self._dyldCtx.file, imageOff)
+		imageOff, dyldCtx = self._dyldCtx.convertAddr(imageAddr)
+
+		# Since we're not editing the dependencies, this should be fine.
+		context = MachOContext(dyldCtx.fileCtx, imageOff)
 		return _DependencyInfo(dylibPath, imageAddr, context)
 
 	def _readDepExports(
@@ -201,9 +203,13 @@ class _Symbolizer(object):
 			# Some images like UIKit don't have exports
 			return []
 
+		linkeditFile = self._dyldCtx.convertAddr(
+			depInfo.context.segments[b"__LINKEDIT"].seg.vmaddr
+		)[1].fileCtx.file
+
 		try:
 			depExports = dyld_trie.ReadExports(
-				depInfo.context.file,
+				linkeditFile,
 				exportOff,
 				exportSize,
 			)
@@ -250,21 +256,19 @@ class _Symbolizer(object):
 			self._logger.warning("Unable to find LC_SYMTAB.")
 			return
 
-		dysymtab: dysymtab_command = self._machoCtx.getLoadCommand(
-			(LoadCommands.LC_DYSYMTAB,)
+		linkeditFile = self._machoCtx.fileForAddr(
+			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
 		)
-		if not dysymtab:
-			self._logger.warning("Unable to find LC_DYSYMTAB.")
 
 		for i in range(symtab.nsyms):
 			self._statusBar.update()
 
 			# Get the symbol and its address
 			entryOff = symtab.symoff + (i * nlist_64.SIZE)
-			symbolEntry = nlist_64(self._machoCtx.file, entryOff)
+			symbolEntry = nlist_64(linkeditFile.file, entryOff)
 
 			symbolAddr = symbolEntry.n_value
-			symbol = self._machoCtx.readString(symtab.stroff + symbolEntry.n_strx)
+			symbol = linkeditFile.readString(symtab.stroff + symbolEntry.n_strx)
 
 			if symbolAddr == 0:
 				continue
@@ -450,10 +454,11 @@ class Arm64Utilities(object):
 			If unable to get the bind data, return None.
 		"""
 
-		if not (helperOff := self._dyldCtx.convertAddr(address)):
+		helperOff, ctx = self._dyldCtx.convertAddr(address) or (None, None)
+		if helperOff is None:
 			return None
 
-		ldr, b, data = self._dyldCtx.readFormat(helperOff, "<III")
+		ldr, b, data = ctx.fileCtx.readFormat(helperOff, "<III")
 
 		# verify
 		if (
@@ -516,11 +521,12 @@ class Arm64Utilities(object):
 
 		SEARCH_LIMIT = 0xC8
 
-		if not (stubOff := self._dyldCtx.convertAddr(address)):
+		stubOff, ctx = self._dyldCtx.convertAddr(address) or (None, None)
+		if stubOff is None:
 			return None
 
 		# test stp and mov
-		stp, mov = self._dyldCtx.readFormat(stubOff, "<II")
+		stp, mov = ctx.fileCtx.readFormat(stubOff, "<II")
 		if (
 			(stp & 0x7FC00000) != 0x29800000
 			or (mov & 0x7F3FFC00) != 0x11000000
@@ -528,7 +534,7 @@ class Arm64Utilities(object):
 			return None
 
 		# Find the branch instruction
-		dataSource = self._dyldCtx.file
+		dataSource = ctx.fileCtx.file
 		branchInstrOff = None
 		for instrOff in range(stubOff, stubOff + SEARCH_LIMIT, 4):
 			# (instr & 0xFE9FF000) == 0xD61F0000
@@ -557,8 +563,8 @@ class Arm64Utilities(object):
 			return None
 
 		# Test if there is a stp before the bl and a ldp before the braaz
-		adrp = self._dyldCtx.readFormat(blInstrOff + 4, "<I")[0]
-		ldp = self._dyldCtx.readFormat(branchInstrOff - 4, "<I")[0]
+		adrp = ctx.fileCtx.readFormat(blInstrOff + 4, "<I")[0]
+		ldp = ctx.fileCtx.readFormat(branchInstrOff - 4, "<I")[0]
 		if (
 			(adrp & 0x9F00001F) != 0x90000010
 			or (ldp & 0x7FC00000) != 0x28C00000
@@ -566,7 +572,7 @@ class Arm64Utilities(object):
 			return None
 
 		# Hopefully it's a resolver...
-		imm = (self._dyldCtx.readFormat(blInstrOff, "<I")[0] & 0x3FFFFFF) << 2
+		imm = (ctx.fileCtx.readFormat(blInstrOff, "<I")[0] & 0x3FFFFFF) << 2
 		imm = self.signExtend(imm, 28)
 		blResult = address + (blInstrOff - stubOff) + imm
 
@@ -609,10 +615,11 @@ class Arm64Utilities(object):
 			be determined.
 		"""
 
-		if not (stubOff := self._dyldCtx.convertAddr(address)):
+		stubOff, ctx = self._dyldCtx.convertAddr(address) or (None, None)
+		if stubOff is None:
 			return None
 
-		adrp, ldr, br = self._dyldCtx.readFormat(stubOff, "<III")
+		adrp, ldr, br = ctx.fileCtx.readFormat(stubOff, "<III")
 
 		# verify
 		if (
@@ -645,10 +652,11 @@ class Arm64Utilities(object):
 			not be determined.
 		"""
 
-		if not (stubOff := self._dyldCtx.convertAddr(address)):
+		stubOff, ctx = self._dyldCtx.convertAddr(address) or (None, None)
+		if stubOff is None:
 			return None
 
-		adrp, add, ldr, braa = self._dyldCtx.readFormat(
+		adrp, add, ldr, braa = ctx.fileCtx.readFormat(
 			stubOff,
 			"<IIII"
 		)
@@ -684,10 +692,11 @@ class Arm64Utilities(object):
 		BR x16
 		"""
 
-		if not (stubOff := self._dyldCtx.convertAddr(address)):
+		stubOff, ctx = self._dyldCtx.convertAddr(address) or (None, None)
+		if stubOff is None:
 			return None
 
-		adrp, ldr, br = self._dyldCtx.readFormat(stubOff, "<III")
+		adrp, ldr, br = ctx.fileCtx.readFormat(stubOff, "<III")
 
 		# verify
 		if (
@@ -716,10 +725,11 @@ class Arm64Utilities(object):
 		BR x16
 		"""
 
-		if not (stubOff := self._dyldCtx.convertAddr(address)):
+		stubOff, ctx = self._dyldCtx.convertAddr(address)
+		if stubOff is None:
 			return None
 
-		adrp, add, br = self._dyldCtx.readFormat(stubOff, "<III")
+		adrp, add, br = ctx.fileCtx.readFormat(stubOff, "<III")
 
 		# verify
 		if (
@@ -748,10 +758,11 @@ class Arm64Utilities(object):
 		11 0a 1f d7  braa  	x16=>__auth_stubs::_CCRandomCopyBytes,x17
 		"""
 
-		if not (stubOff := self._dyldCtx.convertAddr(address)):
+		stubOff, ctx = self._dyldCtx.convertAddr(address)
+		if stubOff is None:
 			return None
 
-		adrp, add, ldr, braa = self._dyldCtx.readFormat(stubOff, "<IIII")
+		adrp, add, ldr, braa = ctx.fileCtx.readFormat(stubOff, "<IIII")
 
 		# verify
 		if (
@@ -787,10 +798,11 @@ class Arm64Utilities(object):
 		1bfcb5d2c 20 00 20 d4  trap
 		"""
 
-		if not (stubOff := self._dyldCtx.convertAddr(address)):
+		stubOff, ctx = self._dyldCtx.convertAddr(address)
+		if stubOff is None:
 			return None
 
-		adrp, add, br, trap = self._dyldCtx.readFormat(stubOff, "<IIII")
+		adrp, add, br, trap = ctx.fileCtx.readFormat(stubOff, "<IIII")
 
 		# verify
 		if (
@@ -819,10 +831,11 @@ class Arm64Utilities(object):
 		1f 0a 1f d6  braaz 	x16=>FUN_195bee070
 		"""
 
-		if not (stubOff := self._dyldCtx.convertAddr(address)):
+		stubOff, ctx = self._dyldCtx.convertAddr(address)
+		if stubOff is None:
 			return None
 
-		adrp, ldr, braaz = self._dyldCtx.readFormat(stubOff, "<III")
+		adrp, ldr, braaz = ctx.fileCtx.readFormat(stubOff, "<III")
 
 		# verify
 		if (
@@ -1024,6 +1037,11 @@ class _StubFixer(object):
 		dyldInfo: dyld_info_command = self._machoCtx.getLoadCommand(
 			(LoadCommands.LC_DYLD_INFO, LoadCommands.LC_DYLD_INFO_ONLY)
 		)
+
+		linkeditFile = self._machoCtx.fileForAddr(
+			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
+		)
+
 		if dyldInfo:
 			records: List[_BindRecord] = []
 			try:
@@ -1031,7 +1049,7 @@ class _StubFixer(object):
 					# usually contains records for c++ symbols like "new"
 					records.extend(
 						_bindReader(
-							self._machoCtx,
+							linkeditFile,
 							dyldInfo.weak_bind_off,
 							dyldInfo.weak_bind_size
 						)
@@ -1041,7 +1059,7 @@ class _StubFixer(object):
 				if dyldInfo.lazy_bind_off:
 					records.extend(
 						_bindReader(
-							self._machoCtx,
+							linkeditFile,
 							dyldInfo.lazy_bind_off,
 							dyldInfo.lazy_bind_size
 						)
@@ -1098,7 +1116,7 @@ class _StubFixer(object):
 							continue
 
 						# Try to symbolize though indirect symbol entries
-						symbolIndex = self._machoCtx.readFormat(
+						symbolIndex = linkeditFile.readFormat(
 							self._dysymtab.indirectsymoff + ((sect.reserved1 + i) * 4),
 							"<I"
 						)[0]
@@ -1109,10 +1127,10 @@ class _StubFixer(object):
 							and symbolIndex != (INDIRECT_SYMBOL_ABS | INDIRECT_SYMBOL_LOCAL)
 						):
 							symbolEntry = nlist_64(
-								self._machoCtx.file,
+								linkeditFile,
 								self._symtab.symoff + (symbolIndex * nlist_64.SIZE)
 							)
-							symbol = self._machoCtx.readString(
+							symbol = linkeditFile.readString(
 								self._symtab.stroff + symbolEntry.n_strx
 							)
 
@@ -1157,6 +1175,14 @@ class _StubFixer(object):
 		if not dyldInfo:
 			return
 
+		textFile = self._machoCtx.fileForAddr(
+			self._machoCtx.segments[b"__TEXT"].seg.vmaddr
+		)
+
+		linkeditFile = self._machoCtx.fileForAddr(
+			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
+		)
+
 		# the stub helper section has the stub binder in
 		# beginning, skip it.
 		helperAddr = helperSect.addr + STUB_BINDER_SIZE
@@ -1168,7 +1194,7 @@ class _StubFixer(object):
 			if (bindOff := self._arm64Utils.getStubHelperData(helperAddr)) is not None:
 				record = next(
 					_bindReader(
-						self._machoCtx,
+						linkeditFile,
 						dyldInfo.lazy_bind_off + bindOff,
 						dyldInfo.lazy_bind_size,
 					),
@@ -1190,7 +1216,7 @@ class _StubFixer(object):
 				bindPtrOff += record.offset
 
 				newBindPtr = struct.pack("<Q", helperAddr)
-				self._machoCtx.writeBytes(bindPtrOff, newBindPtr)
+				textFile.writeBytes(bindPtrOff, newBindPtr)
 				helperAddr += REG_HELPER_SIZE
 				continue
 
