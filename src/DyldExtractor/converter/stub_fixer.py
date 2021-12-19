@@ -1250,6 +1250,10 @@ class _StubFixer(object):
 				stubMap[stubName] = [stubAddr]
 			pass
 
+		linkeditFile = self._machoCtx.fileForAddr(
+			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
+		)
+
 		for segment in self._machoCtx.segmentsI:
 			for sect in segment.sectsI:
 				if sect.flags & SECTION_TYPE == S_SYMBOL_STUBS:
@@ -1262,7 +1266,7 @@ class _StubFixer(object):
 						stubNames = None
 
 						# Try to symbolize though indirect symbol entries
-						symbolIndex = self._machoCtx.readFormat(
+						symbolIndex = linkeditFile.readFormat(
 							self._dysymtab.indirectsymoff + ((sect.reserved1 + i) * 4),
 							"<I"
 						)[0]
@@ -1274,11 +1278,11 @@ class _StubFixer(object):
 							and symbolIndex != (INDIRECT_SYMBOL_ABS | INDIRECT_SYMBOL_LOCAL)
 						):
 							symbolEntry = nlist_64(
-								self._machoCtx.file,
+								linkeditFile.file,
 								self._symtab.symoff + (symbolIndex * nlist_64.SIZE)
 							)
 							stubNames = [
-								self._machoCtx.readString(self._symtab.stroff + symbolEntry.n_strx)
+								linkeditFile.readString(self._symtab.stroff + symbolEntry.n_strx)
 							]
 							pass
 
@@ -1335,32 +1339,24 @@ class _StubFixer(object):
 							elif stubFormat == _StubFormat.StubOptimized:
 								# only need to relink stub
 								newStub = self._arm64Utils.generateStubNormal(stubAddr, symPtrAddr)
-								self._machoCtx.writeBytes(
-									self._dyldCtx.convertAddr(stubAddr),
-									newStub
-								)
+								stubOff, ctx = self._dyldCtx.convertAddr(stubAddr)
+								ctx.fileCtx.writeBytes(stubOff, newStub)
 								continue
 
 							elif stubFormat == _StubFormat.AuthStubNormal:
 								# only need to relink symbol pointer
-								self._machoCtx.writeBytes(
-									self._dyldCtx.convertAddr(symPtrAddr),
-									struct.pack("<Q", stubAddr)
-								)
+								symPtrOff, ctx = self._dyldCtx.convertAddr(symPtrAddr)
+								ctx.fileCtx.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))
 								continue
 
 							elif stubFormat == _StubFormat.AuthStubOptimized:
 								# need to relink both the stub and the symbol pointer
-								self._machoCtx.writeBytes(
-									self._dyldCtx.convertAddr(symPtrAddr),
-									struct.pack("<Q", stubAddr)
-								)
+								symPtrOff, ctx = self._dyldCtx.convertAddr(symPtrAddr)
+								ctx.fileCtx.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))
 
 								newStub = self._arm64Utils.generateAuthStubNormal(stubAddr, symPtrAddr)
-								self._machoCtx.writeBytes(
-									self._dyldCtx.convertAddr(stubAddr),
-									newStub
-								)
+								stubOff, ctx = self._dyldCtx.convertAddr(stubAddr)
+								ctx.fileCtx.writeBytes(stubOff, newStub)
 								continue
 
 							elif stubFormat == _StubFormat.AuthStubResolver:
@@ -1398,7 +1394,7 @@ class _StubFixer(object):
 		textAddr = textSect.addr
 		# Section offsets by section_64.offset are sometimes
 		# inaccurate, like in libcrypto.dylib
-		textOff = self._dyldCtx.convertAddr(textAddr)
+		textOff = self._dyldCtx.convertAddr(textAddr)[0]
 
 		for sectOff in range(0, textSect.size, 4):
 			# We are only looking for bl and b instructions only.
