@@ -99,7 +99,7 @@ class _Symbolizer(object):
 		# get an initial list of dependencies
 		if dylibs := self._machoCtx.getLoadCommand(DEP_LCS, multiple=True):
 			for dylib in dylibs:
-				if depInfo := self._getDepInfo(dylib):
+				if depInfo := self._getDepInfo(dylib, self._machoCtx):
 					depsQueue.append(depInfo)
 			pass
 
@@ -123,8 +123,8 @@ class _Symbolizer(object):
 			if dylibs := depInfo.context.getLoadCommand(DEP_LCS, multiple=True):
 				for dylib in dylibs:
 					if dylib.cmd == LoadCommands.LC_REEXPORT_DYLIB:
-						if depInfo := self._getDepInfo(dylib):
-							depsQueue.append(depInfo)
+						if info := self._getDepInfo(dylib, depInfo.context):
+							depsQueue.append(info)
 				pass
 
 			# check for any ReExport exports
@@ -137,8 +137,8 @@ class _Symbolizer(object):
 
 			for ordinal in reExportOrdinals:
 				dylib = dylibs[ordinal - 1]
-				if depInfo := self._getDepInfo(dylib):
-					depsQueue.append(depInfo)
+				if info := self._getDepInfo(dylib, depInfo.context):
+					depsQueue.append(info)
 				pass
 			pass
 
@@ -161,12 +161,12 @@ class _Symbolizer(object):
 				self._logger.warning(f"No root export for ReExport with symbol {name}")
 		pass
 
-	def _getDepInfo(self, dylib: dylib_command) -> _DependencyInfo:
+	def _getDepInfo(self, dylib: dylib_command, context: MachOContext) -> _DependencyInfo:
 		"""Given a dylib command, get dependency info.
 		"""
 
 		dylibPathOff = dylib._fileOff_ + dylib.dylib.name.offset
-		dylibPath = self._machoCtx.fileCtx.readString(dylibPathOff)
+		dylibPath = context.fileCtx.readString(dylibPathOff)
 		if dylibPath not in self._images:
 			self._logger.warning(f"Unable to find dependency: {dylibPath}")
 			return None
@@ -526,7 +526,7 @@ class Arm64Utilities(object):
 			return None
 
 		# test stp and mov
-		stp, mov = ctx.fileCtx.readFormat(stubOff, "<II")
+		stp, mov = ctx.fileCtx.readFormat("<II", stubOff)
 		if (
 			(stp & 0x7FC00000) != 0x29800000
 			or (mov & 0x7F3FFC00) != 0x11000000
@@ -563,8 +563,8 @@ class Arm64Utilities(object):
 			return None
 
 		# Test if there is a stp before the bl and a ldp before the braaz
-		adrp = ctx.fileCtx.readFormat(blInstrOff + 4, "<I")[0]
-		ldp = ctx.fileCtx.readFormat(branchInstrOff - 4, "<I")[0]
+		adrp = ctx.fileCtx.readFormat("<I", blInstrOff + 4)[0]
+		ldp = ctx.fileCtx.readFormat("<I", branchInstrOff - 4)[0]
 		if (
 			(adrp & 0x9F00001F) != 0x90000010
 			or (ldp & 0x7FC00000) != 0x28C00000
@@ -572,7 +572,7 @@ class Arm64Utilities(object):
 			return None
 
 		# Hopefully it's a resolver...
-		imm = (ctx.fileCtx.readFormat(blInstrOff, "<I")[0] & 0x3FFFFFF) << 2
+		imm = (ctx.fileCtx.readFormat("<I", blInstrOff)[0] & 0x3FFFFFF) << 2
 		imm = self.signExtend(imm, 28)
 		blResult = address + (blInstrOff - stubOff) + imm
 
@@ -619,7 +619,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, ldr, br = ctx.fileCtx.readFormat(stubOff, "<III")
+		adrp, ldr, br = ctx.fileCtx.readFormat("<III", stubOff)
 
 		# verify
 		if (
@@ -657,8 +657,8 @@ class Arm64Utilities(object):
 			return None
 
 		adrp, add, ldr, braa = ctx.fileCtx.readFormat(
-			stubOff,
-			"<IIII"
+			"<IIII",
+			stubOff
 		)
 
 		# verify
@@ -696,7 +696,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, ldr, br = ctx.fileCtx.readFormat(stubOff, "<III")
+		adrp, ldr, br = ctx.fileCtx.readFormat("<III", stubOff)
 
 		# verify
 		if (
@@ -729,7 +729,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, add, br = ctx.fileCtx.readFormat(stubOff, "<III")
+		adrp, add, br = ctx.fileCtx.readFormat("<III", stubOff)
 
 		# verify
 		if (
@@ -762,7 +762,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, add, ldr, braa = ctx.fileCtx.readFormat(stubOff, "<IIII")
+		adrp, add, ldr, braa = ctx.fileCtx.readFormat("<IIII", stubOff)
 
 		# verify
 		if (
@@ -802,7 +802,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, add, br, trap = ctx.fileCtx.readFormat(stubOff, "<IIII")
+		adrp, add, br, trap = ctx.fileCtx.readFormat("<IIII", stubOff)
 
 		# verify
 		if (
@@ -835,7 +835,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, ldr, braaz = ctx.fileCtx.readFormat(stubOff, "<III")
+		adrp, ldr, braaz = ctx.fileCtx.readFormat("<III", stubOff)
 
 		# verify
 		if (
@@ -1117,8 +1117,8 @@ class _StubFixer(object):
 
 						# Try to symbolize though indirect symbol entries
 						symbolIndex = linkeditFile.readFormat(
-							self._dysymtab.indirectsymoff + ((sect.reserved1 + i) * 4),
-							"<I"
+							"<I",
+							self._dysymtab.indirectsymoff + ((sect.reserved1 + i) * 4)
 						)[0]
 						if (
 							symbolIndex != 0
@@ -1127,7 +1127,7 @@ class _StubFixer(object):
 							and symbolIndex != (INDIRECT_SYMBOL_ABS | INDIRECT_SYMBOL_LOCAL)
 						):
 							symbolEntry = nlist_64(
-								linkeditFile,
+								linkeditFile.file,
 								self._symtab.symoff + (symbolIndex * nlist_64.SIZE)
 							)
 							symbol = linkeditFile.readString(
@@ -1254,6 +1254,12 @@ class _StubFixer(object):
 			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
 		)
 
+		textFile = self._machoCtx.fileForAddr(
+			self._machoCtx.segments[b"__TEXT"].seg.vmaddr
+		)
+
+		symbolPtrFile = None
+
 		for segment in self._machoCtx.segmentsI:
 			for sect in segment.sectsI:
 				if sect.flags & SECTION_TYPE == S_SYMBOL_STUBS:
@@ -1267,8 +1273,8 @@ class _StubFixer(object):
 
 						# Try to symbolize though indirect symbol entries
 						symbolIndex = linkeditFile.readFormat(
-							self._dysymtab.indirectsymoff + ((sect.reserved1 + i) * 4),
-							"<I"
+							"<I",
+							self._dysymtab.indirectsymoff + ((sect.reserved1 + i) * 4)
 						)[0]
 
 						if (
@@ -1339,24 +1345,32 @@ class _StubFixer(object):
 							elif stubFormat == _StubFormat.StubOptimized:
 								# only need to relink stub
 								newStub = self._arm64Utils.generateStubNormal(stubAddr, symPtrAddr)
-								stubOff, ctx = self._dyldCtx.convertAddr(stubAddr)
-								ctx.fileCtx.writeBytes(stubOff, newStub)
+								stubOff = self._dyldCtx.convertAddr(stubAddr)[0]
+								textFile.writeBytes(stubOff, newStub)
 								continue
 
 							elif stubFormat == _StubFormat.AuthStubNormal:
 								# only need to relink symbol pointer
-								symPtrOff, ctx = self._dyldCtx.convertAddr(symPtrAddr)
-								ctx.fileCtx.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))
+								symPtrOff = self._dyldCtx.convertAddr(symPtrAddr)[0]
+
+								if symbolPtrFile:
+									symbolPtrFile = self._machoCtx.fileForAddr(symPtrAddr)
+									pass
+
+								symbolPtrFile.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))
 								continue
 
 							elif stubFormat == _StubFormat.AuthStubOptimized:
 								# need to relink both the stub and the symbol pointer
-								symPtrOff, ctx = self._dyldCtx.convertAddr(symPtrAddr)
-								ctx.fileCtx.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))
+								symPtrOff = self._dyldCtx.convertAddr(symPtrAddr)[0]
+								if symbolPtrFile:
+									symbolPtrFile = self._machoCtx.fileForAddr(symPtrAddr)
+									pass
+								symbolPtrFile.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))
 
 								newStub = self._arm64Utils.generateAuthStubNormal(stubAddr, symPtrAddr)
 								stubOff, ctx = self._dyldCtx.convertAddr(stubAddr)
-								ctx.fileCtx.writeBytes(stubOff, newStub)
+								textFile.writeBytes(stubOff, newStub)
 								continue
 
 							elif stubFormat == _StubFormat.AuthStubResolver:
@@ -1395,6 +1409,7 @@ class _StubFixer(object):
 		# Section offsets by section_64.offset are sometimes
 		# inaccurate, like in libcrypto.dylib
 		textOff = self._dyldCtx.convertAddr(textAddr)[0]
+		textFile = self._machoCtx.fileForAddr(textAddr)
 
 		for sectOff in range(0, textSect.size, 4):
 			# We are only looking for bl and b instructions only.
@@ -1402,7 +1417,7 @@ class _StubFixer(object):
 			# most byte. By only looking at the top byte, we can
 			# save a lot of time.
 			instrOff = textOff + sectOff
-			instrTop = self._machoCtx.file[instrOff + 3] & 0xFC
+			instrTop = textFile.file[instrOff + 3] & 0xFC
 
 			if (
 				instrTop != 0x94  # bl
@@ -1411,7 +1426,7 @@ class _StubFixer(object):
 				continue
 
 			# get the target of the branch
-			brInstr = self._machoCtx.readFormat(instrOff, "<I")[0]
+			brInstr = textFile.readFormat("<I", instrOff)[0]
 			imm26 = brInstr & 0x3FFFFFF
 			brOff = self._arm64Utils.signExtend(imm26 << 2, 28)
 
@@ -1428,7 +1443,7 @@ class _StubFixer(object):
 				# Sometimes there are bytes of data in the text section
 				# that match the bl and b filter, these seem to follow a
 				# BR or other branch, skip these.
-				lastInstTop = self._machoCtx.file[instrOff + 3] & 0xFC
+				lastInstTop = textFile.file[instrOff + 3] & 0xFC
 				if (
 					lastInstTop == 0x94  # bl
 					or lastInstTop == 0x14  # b
@@ -1442,7 +1457,7 @@ class _StubFixer(object):
 			stubSymbol = next((sym for sym in funcSymbols if sym in stubMap), None)
 			if not stubSymbol:
 				# Same as above
-				lastInstTop = self._machoCtx.file[instrOff + 3] & 0xFC
+				lastInstTop = textFile.file[instrOff + 3] & 0xFC
 				if (
 					lastInstTop == 0x94  # bl
 					or lastInstTop == 0x14  # b
@@ -1457,7 +1472,7 @@ class _StubFixer(object):
 			stubAddr = stubMap[stubSymbol][0]
 			imm26 = (stubAddr - brAddr) >> 2
 			brInstr = (brInstr & 0xFC000000) | imm26
-			struct.pack_into("<I", self._machoCtx.file, instrOff, brInstr)
+			struct.pack_into("<I", textFile.file, instrOff, brInstr)
 
 			self._statusBar.update(status="Fixing Callsites")
 			pass
@@ -1481,6 +1496,10 @@ class _StubFixer(object):
 
 		self._statusBar.update(status="Fixing Indirect Symbols")
 
+		linkeditFile = self._machoCtx.fileForAddr(
+			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
+		)
+
 		currentSymbolIndex = self._dysymtab.iundefsym + self._dysymtab.nundefsym
 		currentStringIndex = self._symtab.strsize
 
@@ -1498,7 +1517,7 @@ class _StubFixer(object):
 						self._statusBar.update()
 
 						entryOffset = self._dysymtab.indirectsymoff + (i * 4)
-						entry = self._machoCtx.readFormat(entryOffset, "<I")[0]
+						entry = linkeditFile.readFormat("<I", entryOffset)[0]
 
 						if entry != 0:
 							continue
@@ -1521,7 +1540,7 @@ class _StubFixer(object):
 						currentStringIndex += len(stubSymbol)
 
 						# update the indirect entry and add it
-						self._machoCtx.writeBytes(
+						linkeditFile.writeBytes(
 							entryOffset,
 							struct.pack("<I", currentSymbolIndex)
 						)
@@ -1542,7 +1561,7 @@ class _StubFixer(object):
 						self._statusBar.update()
 
 						entryOffset = self._dysymtab.indirectsymoff + (i * 4)
-						entry = self._machoCtx.readFormat(entryOffset, "<I")[0]
+						entry = linkeditFile.readFormat("<I", entryOffset)[0]
 
 						if entry != 0:
 							continue
@@ -1565,7 +1584,7 @@ class _StubFixer(object):
 						currentStringIndex += len(ptrSymbol)
 
 						# update the indirect entry and add it
-						self._machoCtx.writeBytes(
+						linkeditFile.writeBytes(
 							entryOffset,
 							struct.pack("<I", currentSymbolIndex)
 						)
@@ -1586,7 +1605,7 @@ class _StubFixer(object):
 						self._statusBar.update()
 
 						entryOffset = self._dysymtab.indirectsymoff + (i * 4)
-						entry = self._machoCtx.readFormat(entryOffset, "<I")[0]
+						entry = linkeditFile.readFormat("<I", entryOffset)[0]
 
 						if entry != 0:
 							continue
@@ -1602,7 +1621,7 @@ class _StubFixer(object):
 						self._statusBar.update()
 
 						entryOffset = self._dysymtab.indirectsymoff + (i * 4)
-						entry = self._machoCtx.readFormat(entryOffset, "<I")[0]
+						entry = linkeditFile.readFormat("<I", entryOffset)[0]
 
 						if entry != 0:
 							continue
@@ -1626,11 +1645,11 @@ class _StubFixer(object):
 		self._statusBar.update()
 
 		# add the new data and update the load commands
-		self._machoCtx.writeBytes(
+		linkeditFile.writeBytes(
 			self._symtab.symoff + (self._symtab.nsyms * nlist_64.SIZE),
 			newSymbols
 		)
-		self._machoCtx.writeBytes(
+		linkeditFile.writeBytes(
 			self._symtab.stroff + self._symtab.strsize,
 			newStrings
 		)
