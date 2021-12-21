@@ -46,12 +46,12 @@ def disasm_lite_new(self, code, offset, count=0, codeOffset=0):
 	# Pass a bytearray by reference
 	if isinstance(code, bytearray):
 		code = ctypes.byref(ctypes.c_char.from_buffer(code, codeOffset))
-	res = cp._cs.cs_disasm(self.csh, code, size, offset, count, ctypes.byref(all_insn))
+	res = cp._cs.cs_disasm(self.csh, code, size, offset, count, ctypes.byref(all_insn))  # noqa
 	if res > 0:
 		try:
 			for i in range(res):
 				insn = all_insn[i]
-				yield (insn.address, insn.size, insn.mnemonic.decode('ascii'), insn.op_str.decode('ascii'))
+				yield (insn.address, insn.size, insn.mnemonic.decode('ascii'), insn.op_str.decode('ascii'))  # noqa
 		finally:
 			cp._cs.cs_free(all_insn, res)
 	else:
@@ -112,7 +112,10 @@ class _ObjCSelectorFixer(object):
 
 		# enumerate the text
 		textSectAddr = textSect.addr
-		textSectOff = self._dyldCtx.convertAddr(textSectAddr)
+		textSectOff, ctx = self._dyldCtx.convertAddr(textSectAddr)
+
+		textFile = ctx.fileCtx
+		writableTextFile = self._machoCtx.fileForAddr(textSectAddr)
 
 		for i, instrData in enumerate(self._textInstr):
 			if instrData[1] != "adrp":
@@ -126,7 +129,7 @@ class _ObjCSelectorFixer(object):
 
 			adrpAddr = textSectAddr + (i * 4)
 			adrpOff = textSectOff + (i * 4)
-			adrpInstr = self._dyldCtx.readFormat(adrpOff, "<I")[0]
+			adrpInstr = textFile.readFormat("<I", adrpOff)[0]
 
 			# Find the ADRP result
 			immlo = (adrpInstr & 0x60000000) >> 29
@@ -139,7 +142,7 @@ class _ObjCSelectorFixer(object):
 
 			for addInstrIdx in addInstrIdxs:
 				addOff = textSectOff + (addInstrIdx * 4)
-				addInstr = self._dyldCtx.readFormat(addOff, "<I")[0]
+				addInstr = textFile.readFormat("<I", addOff)[0]
 
 				# Test for a special ADD cases
 				if addInstr & 0xffc00000 != 0x91000000:
@@ -165,7 +168,7 @@ class _ObjCSelectorFixer(object):
 					immhi = (adrpDelta >> 9) & (0x00FFFFE0)
 					immlo = (adrpDelta << 17) & (0x60000000)
 					newAdrp = (0x90000000) | immlo | immhi | adrpInstr & 0x1F
-					self._machoCtx.writeBytes(adrpOff, struct.pack("<I", newAdrp))
+					writableTextFile.writeBytes(adrpOff, struct.pack("<I", newAdrp))
 					pass
 				else:
 					# Make sure the new address is reachable with the new adrp
@@ -180,7 +183,7 @@ class _ObjCSelectorFixer(object):
 				imm12 = (ldrTargetOff << 7) & 0x3FFC00
 				ldrRegisters = addInstr & 0x3FF
 				newLdr = 0xF9400000 | imm12 | ldrRegisters
-				self._machoCtx.writeBytes(addOff, struct.pack("<I", newLdr))
+				writableTextFile.writeBytes(addOff, struct.pack("<I", newLdr))
 
 				self._statusBar.update(status="Fixing Selectors")
 				pass
@@ -193,8 +196,8 @@ class _ObjCSelectorFixer(object):
 		self._statusBar.update(status="Disassembling Text (will appear frozen)")
 
 		textSect = self._machoCtx.segments[b"__TEXT"].sects[b"__text"]
-		textSectOff = self._dyldCtx.convertAddr(textSect.addr)
-		textData = bytearray(self._dyldCtx.getBytes(textSectOff, textSect.size))
+		textSectOff, ctx = self._dyldCtx.convertAddr(textSect.addr)
+		textData = bytearray(ctx.fileCtx.getBytes(textSectOff, textSect.size))
 
 		opStrTrans = str.maketrans("", "", "[]!")
 		disassembler = cp.Cs(cp.CS_ARCH_ARM64, cp.CS_MODE_LITTLE_ENDIAN)
@@ -474,7 +477,7 @@ class _ObjCFixer(object):
 		# Get a starting address for the new segment
 		newSegStartAddr = (leftSeg.vmaddr + leftSeg.vmsize + 0x1000) & ~0xFFF
 		newSegStartOff = (
-			self._dyldCtx.convertAddr(leftSeg.vmaddr) + leftSeg.vmsize
+			self._dyldCtx.convertAddr(leftSeg.vmaddr)[0] + leftSeg.vmsize
 			+ 0x1000
 		) & ~0xFFF
 
@@ -543,6 +546,7 @@ class _ObjCFixer(object):
 					pass
 
 				elif sect.sectname == b"__objc_selrefs":
+					file = self._machoCtx.fileForAddr(sect.addr)
 					for ptrAddr in range(sect.addr, sect.addr + sect.size, 8):
 						self._statusBar.update(status="Processing Selector References")
 						selRefAddr = self._slider.slideAddress(ptrAddr)
@@ -550,8 +554,8 @@ class _ObjCFixer(object):
 						self._selRefCache[selRefAddr] = ptrAddr
 
 						newPtr = self._processString(selRefAddr)
-						self._machoCtx.writeBytes(
-							self._dyldCtx.convertAddr(ptrAddr),
+						file.writeBytes(
+							self._dyldCtx.convertAddr(ptrAddr)[0],
 							struct.pack("<Q", newPtr)
 						)
 						pass
@@ -1238,7 +1242,9 @@ class _ObjCFixer(object):
 			if cmd in commandsToRemove:
 				continue
 
-			loadCommandsData.extend(self._machoCtx.fileCtx.getBytes(readHead, cmd.cmdsize))
+			loadCommandsData.extend(
+				self._machoCtx.fileCtx.getBytes(readHead, cmd.cmdsize)
+			)
 			readHead += cmd.cmdsize
 			pass
 
@@ -1249,8 +1255,7 @@ class _ObjCFixer(object):
 			loadCommandsData
 		)
 
-		self._machoCtx = MachOContext(self._machoCtx.fileCtx.file, self._machoCtx.fileOffset)
-		self._extractionCtx.machoCtx = self._machoCtx
+		self._machoCtx.reloadLoadCommands()
 		pass
 
 	def _addExtraDataSeg(self) -> None:
@@ -1266,25 +1271,30 @@ class _ObjCFixer(object):
 			+ self._machoCtx.header.sizeofcmds
 			- moveStart
 		)
-		self._machoCtx.file.move(
+		self._machoCtx.fileCtx.file.move(
 			moveStart + segment_command_64.SIZE,
 			moveStart,
 			bytesToMove
 		)
 
+		self._machoCtx.fileCtx.writeBytes(moveStart, self._extraSegment)
+
 		# add the new data and the segment command
-		self._machoCtx.writeBytes(self._extraSegment.fileoff, self._extraData)
-		self._machoCtx.writeBytes(moveStart, self._extraSegment)
+		file = self._machoCtx.fileForAddr(self._extraSegment.vmaddr)
+		if not file:
+			self._logger.error("Encountered edge case when adding extra data!")
+			return
+
+		file.writeBytes(
+			self._extraSegment.fileoff,
+			self._extraData
+		)
 
 		# update the header
 		self._machoCtx.header.ncmds += 1
 		self._machoCtx.header.sizeofcmds += segment_command_64.SIZE
 
-		# recreate the macho context to reflect the new segment
-		self._extractionCtx.machoCtx = MachOContext(
-			self._machoCtx.file,
-			self._machoCtx.fileOffset
-		)
+		self._machoCtx.reloadLoadCommands()
 		pass
 	pass
 

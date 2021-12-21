@@ -161,7 +161,11 @@ class _Symbolizer(object):
 				self._logger.warning(f"No root export for ReExport with symbol {name}")
 		pass
 
-	def _getDepInfo(self, dylib: dylib_command, context: MachOContext) -> _DependencyInfo:
+	def _getDepInfo(
+		self,
+		dylib: dylib_command,
+		context: MachOContext
+	) -> _DependencyInfo:
 		"""Given a dylib command, get dependency info.
 		"""
 

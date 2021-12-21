@@ -43,7 +43,7 @@ class MachOContext(object):
 		self.fileCtx = fileCtx
 		self.fileOffset = offset
 
-		self.header = mach_header_64(fileCtx.file, offset)
+		self.header = mach_header_64(self.fileCtx.file, self.fileOffset)
 		self._mappings: List[Tuple[dyld_cache_mapping_info, FileContext]] = []
 
 		# check to make sure the MachO file is 64 bit
@@ -110,6 +110,7 @@ class MachOContext(object):
 
 		Parse the load commands and set the loadCommands attribute.
 		"""
+		self.header = mach_header_64(self.fileCtx.file, self.fileOffset)
 
 		self.loadCommands = []
 
@@ -139,6 +140,16 @@ class MachOContext(object):
 				self.segmentsI.append(segCtx)
 				pass
 			pass
+		pass
+
+	def reloadLoadCommands(self) -> None:
+		"""Reload the load commands.
+
+		Read the header and load commands with the
+		same file and offset.
+		"""
+
+		self._parseLoadCommands()
 		pass
 
 	def addSubfiles(
