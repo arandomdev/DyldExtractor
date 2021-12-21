@@ -1353,7 +1353,7 @@ class _StubFixer(object):
 								# only need to relink symbol pointer
 								symPtrOff = self._dyldCtx.convertAddr(symPtrAddr)[0]
 
-								if symbolPtrFile:
+								if not symbolPtrFile:
 									symbolPtrFile = self._machoCtx.fileForAddr(symPtrAddr)
 									pass
 
@@ -1363,7 +1363,7 @@ class _StubFixer(object):
 							elif stubFormat == _StubFormat.AuthStubOptimized:
 								# need to relink both the stub and the symbol pointer
 								symPtrOff = self._dyldCtx.convertAddr(symPtrAddr)[0]
-								if symbolPtrFile:
+								if not symbolPtrFile:
 									symbolPtrFile = self._machoCtx.fileForAddr(symPtrAddr)
 									pass
 								symbolPtrFile.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))

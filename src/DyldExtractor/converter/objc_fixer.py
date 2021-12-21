@@ -75,236 +75,6 @@ class _ObjCSelectorFixer(object):
 		extractionCtx: ExtractionContext,
 		delegate: "_ObjCFixer"
 	) -> None:
-		"""Un-does direct selector loading.
-
-		Args:
-			extractionCtx: The extraction context
-			delegate: The delegate to add more data if needed.
-		"""
-
-		super().__init__()
-
-		self._dyldCtx = extractionCtx.dyldCtx
-		self._machoCtx = extractionCtx.machoCtx
-		self._statusBar = extractionCtx.statusBar
-		self._logger = extractionCtx.logger
-		self._delegate = delegate
-
-		self.opStrTrans = str.maketrans("", "", "[]!")
-		pass
-
-	def run(self):
-		try:
-			textSect = self._machoCtx.segments[b"__TEXT"].sects[b"__text"]
-			pass
-		except KeyError:
-			self._logger.error("Unable to get __text section")
-			pass
-
-		self._statusBar.update(status="Fixing Selectors")
-
-		disassembler = cp.Cs(cp.CS_ARCH_ARM64, cp.CS_MODE_LITTLE_ENDIAN)
-
-		textSectAddr = textSect.addr
-		textSectOff = self._dyldCtx.convertAddr(textSectAddr)
-		textSectEnd = textSectOff + textSect.size
-
-		for sectOff in range(0, textSect.size, 4):
-			# Direct Selectors start with an ADRP instruction
-			adrpOff = textSectOff + sectOff
-			if self._dyldCtx.file[adrpOff + 3] & 0x9F != 0x90:
-				continue
-			adrpAddr = textSectAddr + sectOff
-
-			# try to find the matching add instruction
-			addRelOff = self._findAddInstr(
-				disassembler,
-				adrpAddr,
-				adrpOff,
-				textSectEnd
-			)
-			if addRelOff is None:
-				continue
-
-			addOff = adrpOff + addRelOff
-
-			adrpInstr = self._dyldCtx.readFormat(adrpOff, "<I")[0]
-			addInstr = self._dyldCtx.readFormat(addOff, "<I")[0]
-
-			# Find the target of the direct selector load
-			# ADRP
-			immlo = (adrpInstr & 0x60000000) >> 29
-			immhi = (adrpInstr & 0xFFFFE0) >> 3
-			imm = (immhi | immlo) << 12
-			imm = stub_fixer.Arm64Utilities.signExtend(imm, 33)
-
-			adrpResult = (adrpAddr & ~0xFFF) + imm
-
-			# ADD
-			imm = (addInstr & 0x3FFC00) >> 10
-			loadTarget = adrpResult + imm
-
-			# check if it needs fixing
-			if self._machoCtx.containsAddr(loadTarget):
-				continue
-
-			if loadTarget not in self._delegate._selRefCache:
-				# check if its a valid address
-				if not self._dyldCtx.convertAddr(loadTarget):
-					continue
-
-				self._addStringAndFixLoad(
-					loadTarget,
-					adrpInstr,
-					adrpAddr,
-					adrpOff,
-					addInstr,
-					addOff
-				)
-				self._statusBar.update(status="Fixing Selectors")
-				continue
-
-			self._fixLoad(
-				loadTarget,
-				adrpInstr,
-				adrpAddr,
-				adrpOff,
-				addInstr,
-				addOff
-			)
-			self._statusBar.update(status="Fixing Selectors")
-			pass
-		pass
-
-	def _fixLoad(
-		self,
-		loadTarget: int,
-		adrpInstr: int,
-		adrpAddr: int,
-		adrpOff: int,
-		addInstr: int,
-		addOff: int
-	):
-		selRefPtr = self._delegate._selRefCache[loadTarget]
-
-		adrpDelta = (selRefPtr & -4096) - (adrpAddr & -4096)
-		immhi = (adrpDelta >> 9) & (0x00FFFFE0)
-		immlo = (adrpDelta << 17) & (0x60000000)
-		newAdrp = (0x90000000) | immlo | immhi | adrpInstr & 0x1F
-
-		ldrTargetOff = selRefPtr - (selRefPtr & -4096)
-		imm12 = (ldrTargetOff << 7) & 0x3FFC00
-		ldrRegisters = addInstr & 0x3FF
-		newLdr = 0xF9400000 | imm12 | ldrRegisters
-
-		self._machoCtx.writeBytes(adrpOff, struct.pack("<I", newAdrp))
-		self._machoCtx.writeBytes(addOff, struct.pack("<I", newLdr))
-		pass
-
-	def _addStringAndFixLoad(
-		self,
-		loadTarget: int,
-		adrpInstr: int,
-		adrpAddr: int,
-		adrpOff: int,
-		addInstr: int,
-		addOff: int
-	):
-		# There are some files that access strings that do not have
-		# a selector reference. Pull in the string and repoint the
-		# ADRP and ADD to it.
-		stringAddr = self._delegate._processString(loadTarget)
-
-		adrpDelta = (stringAddr & -4096) - (adrpAddr & -4096)
-		immhi = (adrpDelta >> 9) & (0x00FFFFE0)
-		immlo = (adrpDelta << 17) & (0x60000000)
-		newAdrp = (0x90000000) | immlo | immhi | adrpInstr & 0x1F
-
-		addTargetOff = stringAddr - (stringAddr & -4096)
-		imm12 = (addTargetOff << 10) & 0x3FFC00
-		addRegisters = addInstr & 0x3FF
-		newAdd = 0x91000000 | imm12 | addRegisters
-
-		self._machoCtx.writeBytes(adrpOff, struct.pack("<I", newAdrp))
-		self._machoCtx.writeBytes(addOff, struct.pack("<I", newAdd))
-		pass
-
-	def _findAddInstr(
-		self,
-		disassembler: cp.Cs,
-		adrpAddr: int,
-		adrpOff: int,
-		textEnd: int
-	) -> int:
-		"""Find the address of a matching add instruction.
-
-		Args:
-			disassembler: The initalized disassembler.
-			adrpAddr: The address of the ADRP instruction.
-			adrpOff: The file offset of the ADRP instruction.
-			textEnd: The file offset to the end of the text section.
-
-		Return:
-			The relative offset to the add instruction, or None if it
-			could not be found.
-		"""
-
-		# get the destination register for the ADRP
-		# process instructions in 64 byte chunks
-		blockSlice = slice(adrpOff, min(adrpOff + 64, textEnd))
-		instrData = self._dyldCtx.file[blockSlice]
-		blockDisasm = disassembler.disasm_lite(instrData, adrpAddr)
-		adrpInstr = next(blockDisasm)
-
-		if adrpInstr[2] != "adrp":
-			self._logger.error(f"Expected an adrp instruction at {hex(adrpAddr)}")
-			return None
-
-		adrpDestReg = self._getOpcodes(adrpInstr[3])[0]
-
-		instrBlockOff = adrpOff + 4
-		instrBlockAddr = adrpAddr + 4
-		while instrBlockOff < textEnd:
-			for instruction in blockDisasm:
-				# instruction = (address, size, mnemonic, op_str)
-				opcodes = self._getOpcodes(instruction[3])
-
-				# check if the ADRP dest reg matches the base reg for ADD
-				if instruction[2] == "add" and opcodes[1] == adrpDestReg:
-					return instruction[0] - adrpAddr
-
-				# If we find an instruction modifying the register,
-				# it probably isn't a selector reference
-				if adrpDestReg == opcodes[0]:
-					return None
-				pass
-
-			# process the next block if needed
-			instrBlockOff += len(instrData)
-			instrBlockAddr += len(instrData)
-
-			blockSlice = slice(instrBlockOff, min(instrBlockOff + 64, textEnd))
-			instrData = self._dyldCtx.file[blockSlice]
-			blockDisasm = disassembler.disasm_lite(instrData, instrBlockAddr)
-			pass
-
-		return None
-
-	def _getOpcodes(self, opStr: str) -> List[str]:
-		return [
-			opcode.strip()
-			for opcode
-			in opStr.translate(self.opStrTrans).split(",")
-		]
-	pass
-
-
-class _ObjCSelectorFixerV2(object):
-	def __init__(
-		self,
-		extractionCtx: ExtractionContext,
-		delegate: "_ObjCFixer"
-	) -> None:
 		"""Un-does direct selector loading... second try.
 
 		Args:
@@ -606,22 +376,29 @@ class _ObjCFixer(object):
 	def run(self):
 		# check if the optimization flag is set
 		imageInfo = None
+		imageInfoFile = None
 		for seg in self._machoCtx.segmentsI:
 			if b"__objc_imageinfo" in seg.sects:
 				imageInfo = seg.sects[b"__objc_imageinfo"]
+				imageInfoFile = self._machoCtx.fileForAddr(seg.seg.vmaddr)
 				break
 			pass
 
 		if not imageInfo:
 			return
 
-		flags = self._machoCtx.readFormat(
-			self._dyldCtx.convertAddr(imageInfo.addr) + 4,
-			"<I"
+		flagsOff = self._dyldCtx.convertAddr(imageInfo.addr)[0]
+		flags = imageInfoFile.readFormat(
+			"<I",
+			flagsOff + 4,
 		)[0]
 		if not flags & 0x8:
 			self._logger.info("ObjC was not optimized by Dyld, not fixing ObjC.")
 			return
+
+		# Removed the optimized objc bit
+		flags &= 0xfffffff7
+		imageInfoFile.writeBytes(flagsOff, struct.pack("<I", flags))
 
 		self._createExtraSegment()
 
@@ -653,9 +430,7 @@ class _ObjCFixer(object):
 		self._processSections()
 		self._finalizeFutureClasses()
 
-		# self._fixSelectors_OLD()
-		# _ObjCSelectorFixer(self._extractionCtx, self).run()
-		_ObjCSelectorFixerV2(self._extractionCtx, self).run()
+		_ObjCSelectorFixer(self._extractionCtx, self).run()
 
 		self._checkSpaceConstraints()
 		self._addExtraDataSeg()
@@ -840,8 +615,9 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(categoryAddr):
 			newCategoryAddr = categoryAddr
 
-			defOff = self._dyldCtx.convertAddr(categoryAddr)
-			self._machoCtx.writeBytes(defOff, categoryDef)
+			file = self._machoCtx.fileForAddr(categoryAddr)
+			defOff = self._dyldCtx.convertAddr(categoryAddr)[0]
+			file.writeBytes(defOff, categoryDef)
 			pass
 		else:
 			newCategoryAddr = self._extraDataHead
@@ -867,7 +643,7 @@ class _ObjCFixer(object):
 
 		Returns:
 			If the class if fully defined the updated address
-			of the class is returned along with False. otherwise
+			of the class is returned along with False. Otherwise
 			the original address of the class is returned, along
 			with True.
 		"""
@@ -912,8 +688,9 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(classAddr):
 			newClassAddr = classAddr
 
-			defOff = self._dyldCtx.convertAddr(classAddr)
-			self._machoCtx.writeBytes(defOff, classDef)
+			file = self._machoCtx.fileForAddr(classAddr)
+			defOff = self._dyldCtx.convertAddr(classAddr)[0]
+			file.writeBytes(defOff, classDef)
 			pass
 
 		else:
@@ -989,8 +766,9 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(classDataAddr):
 			newClassDataAddr = classDataAddr
 
-			defOff = self._dyldCtx.convertAddr(classDataAddr)
-			self._machoCtx.writeBytes(defOff, classDataDef)
+			file = self._machoCtx.fileForAddr(classDataAddr)
+			defOff = self._dyldCtx.convertAddr(classDataAddr)[0]
+			file.writeBytes(defOff, classDataDef)
 			pass
 
 		else:
@@ -1041,8 +819,9 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(ivarListAddr):
 			newIvarListAddr = ivarListAddr
 
-			defOff = self._dyldCtx.convertAddr(ivarListAddr)
-			self._machoCtx.writeBytes(defOff, ivarListData)
+			file = self._machoCtx.fileForAddr(ivarListAddr)
+			defOff = self._dyldCtx.convertAddr(ivarListAddr)[0]
+			file.writeBytes(defOff, ivarListData)
 			pass
 		else:
 			newIvarListAddr = self._extraDataHead
@@ -1074,8 +853,9 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(protoListAddr):
 			newProtoListAddr = protoListAddr
 
-			defOff = self._dyldCtx.convertAddr(protoListAddr)
-			self._machoCtx.writeBytes(defOff, protoListData)
+			file = self._machoCtx.fileForAddr(protoListAddr)
+			defOff = self._dyldCtx.convertAddr(protoListAddr)[0]
+			file.writeBytes(defOff, protoListData)
 			pass
 		else:
 			newProtoListAddr = self._extraDataHead
@@ -1143,8 +923,9 @@ class _ObjCFixer(object):
 			newPtr = self._processString(oldPtr)
 
 			if self._machoCtx.containsAddr(protoDef.extendedMethodTypes):
-				ptrOff = self._dyldCtx.convertAddr(protoDef.extendedMethodTypes)
-				struct.pack_into("<Q", self._machoCtx.file, ptrOff, newPtr)
+				file = self._machoCtx.fileForAddr(protoDef.extendedMethodTypes)
+				ptrOff = self._dyldCtx.convertAddr(protoDef.extendedMethodTypes)[0]
+				struct.pack_into("<Q", file.file, ptrOff, newPtr)
 				pass
 			else:
 				protoDef.extendedMethodTypes = self._extraDataHead
@@ -1171,8 +952,9 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(protoAddr):
 			newProtoAddr = protoAddr
 
-			defOff = self._dyldCtx.convertAddr(protoAddr)
-			self._machoCtx.writeBytes(defOff, protoData)
+			file = self._machoCtx.fileForAddr(protoAddr)
+			defOff = self._dyldCtx.convertAddr(protoAddr)[0]
+			file.writeBytes(defOff, protoData)
 			pass
 		else:
 			newProtoAddr = self._extraDataHead
@@ -1221,8 +1003,9 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(propertyListAddr):
 			newPropertyListAddr = propertyListAddr
 
-			defOff = self._dyldCtx.convertAddr(propertyListAddr)
-			self._machoCtx.writeBytes(defOff, propertyListData)
+			file = self._machoCtx.fileForAddr(propertyListAddr)
+			defOff = self._dyldCtx.convertAddr(propertyListAddr)[0]
+			file.writeBytes(defOff, propertyListData)
 			pass
 		else:
 			newPropertyListAddr = self._extraDataHead
@@ -1311,8 +1094,9 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(methodListAddr):
 			newMethodListAddr = methodListAddr
 
-			defOff = self._dyldCtx.convertAddr(methodListAddr)
-			self._machoCtx.writeBytes(defOff, methodListData)
+			file = self._machoCtx.fileForAddr(methodListAddr)
+			defOff = self._dyldCtx.convertAddr(methodListAddr)[0]
+			file.writeBytes(defOff, methodListData)
 			pass
 		else:
 			newMethodListAddr = self._extraDataHead
@@ -1340,7 +1124,8 @@ class _ObjCFixer(object):
 		else:
 			newStringAddr = self._extraDataHead
 
-			stringData = self._dyldCtx.readString(self._dyldCtx.convertAddr(stringAddr))
+			stringOff, ctx = self._dyldCtx.convertAddr(stringAddr)
+			stringData = ctx.fileCtx.readString(stringOff)
 			self._addExtraData(stringData)
 			pass
 
@@ -1357,8 +1142,8 @@ class _ObjCFixer(object):
 		else:
 			newIntAddr = self._extraDataHead
 
-			intOff = self._dyldCtx.convertAddr(intAddr)
-			intData = self._dyldCtx.getBytes(intOff, intSize)
+			intOff, ctx = self._dyldCtx.convertAddr(intAddr)
+			intData = ctx.fileCtx.getBytes(intOff, intSize)
 
 			self._addExtraData(intData)
 			pass
@@ -1383,116 +1168,10 @@ class _ObjCFixer(object):
 				struct.pack_into("<Q", self._extraData, ptrOffset, newAddr)
 				pass
 			else:
-				ptrOffset = self._dyldCtx.convertAddr(destPtr)
-				struct.pack_into("Q", self._machoCtx.file, ptrOffset, newAddr)
+				file = self._machoCtx.fileForAddr(destPtr)
+				ptrOffset = self._dyldCtx.convertAddr(destPtr)[0]
+				struct.pack_into("Q", file.file, ptrOffset, newAddr)
 				pass
-			pass
-		pass
-
-	def _fixSelectors_OLD(self) -> None:
-		"""Undo direct selector loading.
-
-		Changes instructions to use the selref section again.
-		"""
-
-		try:
-			textSect = self._machoCtx.segments[b"__TEXT"].sects[b"__text"]
-			pass
-		except KeyError:
-			self._logger.error("Unable to get __text section")
-			pass
-
-		self._statusBar.update(status="Fixing Selectors")
-
-		textSectAddr = textSect.addr
-		textSectOff = self._dyldCtx.convertAddr(textSectAddr)
-
-		for sectOff in range(0, textSect.size - 4, 4):
-			# Direct selector loads consist of an ADRP and ADD instruction
-			adrpOff = textSectOff + sectOff
-			if self._machoCtx.file[adrpOff + 3] & 0x9F != 0x90:
-				continue
-
-			addOff = textSectOff + sectOff + 4
-			if self._machoCtx.file[addOff + 3] != 0x91:
-				# Some times there are extra instructions in between
-				if self._machoCtx.file[addOff + 7] == 0x91:
-					addOff += 4
-					pass
-				elif self._machoCtx.file[addOff + 11] == 0x91:
-					addOff += 8
-					pass
-				else:
-					continue
-
-			adrp = self._machoCtx.readFormat(adrpOff, "<I")[0]
-			add = self._machoCtx.readFormat(addOff, "<I")[0]
-
-			# verify that the ADRP Destination register matches
-			# the ADD Base register
-			adrpDestReg = adrp & 0x1F
-			addBaseReg = (add >> 5) & 0x1F
-			if adrpDestReg != addBaseReg:
-				continue
-
-			# get the selector address
-			adrpAddr = textSectAddr + sectOff
-
-			# ADRP
-			immlo = (adrp & 0x60000000) >> 29
-			immhi = (adrp & 0xFFFFE0) >> 3
-			imm = (immhi | immlo) << 12
-			imm = stub_fixer.Arm64Utilities.signExtend(imm, 33)
-
-			adrpResult = (adrpAddr & ~0xFFF) + imm
-
-			# ADD
-			imm = (add & 0x3FFC00) >> 10
-			loadTarget = adrpResult + imm
-
-			if self._machoCtx.containsAddr(loadTarget):
-				continue
-
-			if loadTarget not in self._selRefCache:
-				# There are some files that access strings that do not have
-				# a selector reference. Pull in the string and repoint the
-				# ADRP and ADD to it.
-				stringAddr = self._processString(loadTarget)
-
-				adrpDelta = (stringAddr & -4096) - (adrpAddr & -4096)
-				immhi = (adrpDelta >> 9) & (0x00FFFFE0)
-				immlo = (adrpDelta << 17) & (0x60000000)
-				newAdrp = (0x90000000) | immlo | immhi | adrpDestReg
-
-				addOff = stringAddr - (stringAddr & -4096)
-				imm12 = (addOff << 10) & 0x3FFC00
-				addDestReg = add & 0x1F
-				newAdd = 0x91000000 | imm12 | (addBaseReg << 5) | addDestReg
-
-				self._machoCtx.writeBytes(adrpOff, struct.pack("<I", newAdrp))
-				self._machoCtx.writeBytes(addOff, struct.pack("<I", newAdd))
-
-				self._statusBar.update(status="Fixing Selectors")
-				continue
-
-			selRefPtr = self._selRefCache[loadTarget]
-
-			# make new adrp and ldr instructions
-			adrpDelta = (selRefPtr & -4096) - (adrpAddr & -4096)
-			immhi = (adrpDelta >> 9) & (0x00FFFFE0)
-			immlo = (adrpDelta << 17) & (0x60000000)
-			newAdrp = 0x90000000 | immlo | immhi | adrpDestReg
-
-			ldrOffset = selRefPtr - (selRefPtr & -4096)
-			imm12 = (ldrOffset << 7) & 0x3FFC00
-			ldrDestReg = add & 0x1F
-			newLdr = 0xF9400000 | imm12 | (addBaseReg << 5) | ldrDestReg
-
-			# write to new instructions
-			self._machoCtx.writeBytes(adrpOff, struct.pack("<I", newAdrp))
-			self._machoCtx.writeBytes(addOff, struct.pack("<I", newLdr))
-
-			self._statusBar.update(status="Fixing Selectors")
 			pass
 		pass
 
@@ -1559,18 +1238,18 @@ class _ObjCFixer(object):
 			if cmd in commandsToRemove:
 				continue
 
-			loadCommandsData.extend(self._machoCtx.getBytes(readHead, cmd.cmdsize))
+			loadCommandsData.extend(self._machoCtx.fileCtx.getBytes(readHead, cmd.cmdsize))
 			readHead += cmd.cmdsize
 			pass
 
 		self._machoCtx.header.ncmds -= len(commandsToRemove)
 		self._machoCtx.header.sizeofcmds = len(loadCommandsData)
-		self._machoCtx.writeBytes(
+		self._machoCtx.fileCtx.writeBytes(
 			self._machoCtx.fileOffset + mach_header_64.SIZE,
 			loadCommandsData
 		)
 
-		self._machoCtx = MachOContext(self._machoCtx.file, self._machoCtx.fileOffset)
+		self._machoCtx = MachOContext(self._machoCtx.fileCtx.file, self._machoCtx.fileOffset)
 		self._extractionCtx.machoCtx = self._machoCtx
 		pass
 

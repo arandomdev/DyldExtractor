@@ -345,7 +345,7 @@ class PointerSlider(object):
 			address: The address of the pointer.
 
 		Returns:
-			The slide version of the pointer. This will return None if
+			The slid version of the pointer. This will return None if
 			the pointer could not be slid.
 		"""
 
