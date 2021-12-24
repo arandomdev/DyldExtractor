@@ -8,8 +8,13 @@ import multiprocessing
 import pathlib
 import signal
 import sys
-
 import progressbar
+
+from typing import (
+	List,
+	BinaryIO,
+	Tuple
+)
 
 from DyldExtractor.converter import (
 	linkedit_optimizer,
@@ -21,6 +26,7 @@ from DyldExtractor.converter import (
 from DyldExtractor.dyld.dyld_context import DyldContext
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.macho.macho_context import MachOContext
+from DyldExtractor.file_context import FileContext
 
 # check dependencies
 try:
@@ -82,6 +88,38 @@ def _workerInitializer():
 	pass
 
 
+def _openSubCaches(
+	mainCachePath: str,
+	numSubCaches: int
+) -> Tuple[List[FileContext], List[BinaryIO]]:
+	"""Create FileContext objects for each sub cache.
+
+	Assumes that each sub cache has the same base name as the
+	main cache, and that the suffixes are preserved.
+
+	Also opens the symbols cache, and adds it to the end of
+	the list.
+
+	Returns:
+		A list of subcaches, and their file objects, which must be closed!
+	"""
+	subCaches = []
+	subCachesFiles = []
+
+	subCacheSuffixes = [i for i in range(1, numSubCaches + 1)]
+	subCacheSuffixes.append("symbols")
+	for cacheSuffix in subCacheSuffixes:
+		subCachePath = f"{mainCachePath}.{cacheSuffix}"
+		cacheFileObject = open(subCachePath, mode="rb")
+		cacheFileCtx = FileContext(cacheFileObject)
+
+		subCaches.append(cacheFileCtx)
+		subCachesFiles.append(cacheFileObject)
+		pass
+
+	return subCaches, subCachesFiles
+
+
 def _extractImage(
 	dyldPath: pathlib.Path,
 	outputDir: pathlib.Path,
@@ -113,42 +151,74 @@ def _extractImage(
 
 	# Process the image
 	with open(dyldPath, "rb") as f:
-		dyldFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-		dyldCtx = DyldContext(dyldFile)
-		imageOffset = dyldCtx.convertAddr(dyldCtx.images[imageIndex].address)
-
-		machoFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_COPY)
-		machoCtx = MachOContext(machoFile, imageOffset)
-
-		extractionCtx = ExtractionContext(
-			dyldCtx,
-			machoCtx,
-			_DummyProgressBar(),
-			logger
-		)
-
+		subCacheFiles: List[BinaryIO] = []
 		try:
+			dyldFileCtx = FileContext(f)
+			dyldCtx = DyldContext(dyldFileCtx)
+
+			# add sub caches if there are any
+			if dyldCtx.hasSubCaches():
+				subCacheFileCtxs, subCacheFiles = _openSubCaches(
+					dyldPath,
+					dyldCtx.header.numSubCaches
+				)
+				dyldCtx.addSubCaches(subCacheFileCtxs)
+				pass
+
+			machoOffset, context = dyldCtx.convertAddr(
+				dyldCtx.images[imageIndex].address
+			)
+			machoCtx = MachOContext(
+				context.fileCtx.makeCopy(copyMode=True),
+				machoOffset
+			)
+
+			# Add sub caches if necessary
+			if dyldCtx.hasSubCaches():
+				mappings = dyldCtx.mappings
+				mainFileMap = next(
+					(mapping[0] for mapping in mappings if mapping[1] == context)
+				)
+				machoCtx.addSubfiles(
+					mainFileMap,
+					((m, ctx.fileCtx.makeCopy(copyMode=True)) for m, ctx in mappings)
+				)
+				pass
+
+			extractionCtx = ExtractionContext(
+				dyldCtx,
+				machoCtx,
+				_DummyProgressBar(),
+				logger
+			)
+
 			slide_info.processSlideInfo(extractionCtx)
 			linkedit_optimizer.optimizeLinkedit(extractionCtx)
 			stub_fixer.fixStubs(extractionCtx)
 			objc_fixer.fixObjC(extractionCtx)
-			macho_offset.optimizeOffsets(extractionCtx)
+
+			writeProcedures = macho_offset.optimizeOffsets(extractionCtx)
 
 			# write the file
 			outputPath.parent.mkdir(parents=True, exist_ok=True)
-			with open(outputPath, "wb+") as outFile:
-				newMachoCtx = extractionCtx.machoCtx
-
-				# get the size of the new file
-				linkeditSeg = newMachoCtx.segments[b"__LINKEDIT"].seg
-				fileSize = linkeditSeg.fileoff + linkeditSeg.filesize
-
-				newMachoCtx.file.seek(0)
-				outFile.write(newMachoCtx.file.read(fileSize))
+			with open(outputPath, "wb") as outFile:
+				for procedure in writeProcedures:
+					outFile.seek(procedure.writeOffset)
+					outFile.write(
+						procedure.fileCtx.getBytes(procedure.readOffset, procedure.size)
+					)
+					pass
 				pass
 			pass
+
 		except Exception as e:
 			logger.exception(e)
+			pass
+
+		finally:
+			for file in subCacheFiles:
+				file.close()
+				pass
 			pass
 		pass
 
@@ -186,11 +256,13 @@ def _main() -> None:
 	# create a list of image paths
 	imagePaths: list[str] = []
 	with open(args.dyld_path, "rb") as f:
-		dyldFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-		dyldCtx = DyldContext(dyldFile)
+		dyldFileCtx = FileContext(f)
+		dyldCtx = DyldContext(dyldFileCtx)
 
 		for image in dyldCtx.images:
-			imagePath = dyldCtx.readString(image.pathFileOffset)[0:-1].decode("utf-8")
+			imagePath = dyldCtx.fileCtx.readString(
+				image.pathFileOffset
+			)[0:-1].decode("utf-8")
 			imagePaths.append(imagePath)
 			pass
 		pass

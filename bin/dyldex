@@ -50,11 +50,10 @@ def _getArguments():
 	"""
 
 	parser = argparse.ArgumentParser()
-	# TODO: update docs
 	parser.add_argument(
 		"dyld_path",
 		type=pathlib.Path,
-		help="A path to the target DYLD cache."
+		help="A path to the target DYLD cache. If it is a split cache, use the path for the main cache (the one without a file type)."  # noqa
 	)
 	parser.add_argument(
 		"-e", "--extract",
@@ -161,9 +160,9 @@ def _extractImage(
 
 		extractionCtx = ExtractionContext(dyldCtx, machoCtx, statusBar, logger)
 
-		slide_info.processSlideInfo(extractionCtx)
+		# slide_info.processSlideInfo(extractionCtx)
 		linkedit_optimizer.optimizeLinkedit(extractionCtx)
-		stub_fixer.fixStubs(extractionCtx)
+		# stub_fixer.fixStubs(extractionCtx)
 		objc_fixer.fixObjC(extractionCtx)
 
 		writeProcedures = macho_offset.optimizeOffsets(extractionCtx)
@@ -186,6 +185,7 @@ def _extractImage(
 			file.close()
 			pass
 		pass
+	pass
 
 
 def _filterImages(imagePaths: List[str], filterTerm: str):
@@ -270,3 +270,4 @@ def main():
 
 if "__main__" == __name__:
 	main()
+	pass

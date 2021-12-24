@@ -276,7 +276,7 @@ def _getMappingInfo(
 
 		# the version is encoded as the first uint32 field
 		slideInfoOff = dyldCtx.header.slideInfoOffsetUnused
-		slideInfoVer = dyldCtx.fileCtx.readFormat(slideInfoOff, "<I")[0]
+		slideInfoVer = dyldCtx.fileCtx.readFormat("<I", slideInfoOff)[0]
 
 		if slideInfoVer not in _SlideInfoMap:
 			logger.error("Unknown slide info version: " + slideInfoVer)

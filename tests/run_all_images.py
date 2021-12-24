@@ -51,7 +51,7 @@ def runForAllImages(
 			break
 
 		imageOffset = dyldCtx.convertAddr(imageData.address)
-		imagePath = dyldCtx.readString(imageData.pathFileOffset)[0:-1]
+		imagePath = dyldCtx.fileCtx.readString(imageData.pathFileOffset)[0:-1]
 		imagePath = imagePath.decode("utf-8")
 		imageName = imagePath.split("/")[-1]
 

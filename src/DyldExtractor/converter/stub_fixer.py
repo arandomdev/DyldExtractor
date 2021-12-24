@@ -462,7 +462,7 @@ class Arm64Utilities(object):
 		if helperOff is None:
 			return None
 
-		ldr, b, data = ctx.fileCtx.readFormat(helperOff, "<III")
+		ldr, b, data = ctx.fileCtx.readFormat("<III", helperOff)
 
 		# verify
 		if (
@@ -729,7 +729,7 @@ class Arm64Utilities(object):
 		BR x16
 		"""
 
-		stubOff, ctx = self._dyldCtx.convertAddr(address)
+		stubOff, ctx = self._dyldCtx.convertAddr(address) or (None, None)
 		if stubOff is None:
 			return None
 
@@ -762,7 +762,7 @@ class Arm64Utilities(object):
 		11 0a 1f d7  braa  	x16=>__auth_stubs::_CCRandomCopyBytes,x17
 		"""
 
-		stubOff, ctx = self._dyldCtx.convertAddr(address)
+		stubOff, ctx = self._dyldCtx.convertAddr(address) or (None, None)
 		if stubOff is None:
 			return None
 
@@ -802,7 +802,7 @@ class Arm64Utilities(object):
 		1bfcb5d2c 20 00 20 d4  trap
 		"""
 
-		stubOff, ctx = self._dyldCtx.convertAddr(address)
+		stubOff, ctx = self._dyldCtx.convertAddr(address) or (None, None)
 		if stubOff is None:
 			return None
 
@@ -835,7 +835,7 @@ class Arm64Utilities(object):
 		1f 0a 1f d6  braaz 	x16=>FUN_195bee070
 		"""
 
-		stubOff, ctx = self._dyldCtx.convertAddr(address)
+		stubOff, ctx = self._dyldCtx.convertAddr(address) or (None, None)
 		if stubOff is None:
 			return None
 

@@ -7,10 +7,15 @@ import progressbar
 import argparse
 import pathlib
 
+from typing import (
+	Tuple,
+	List,
+	BinaryIO
+)
+
+from DyldExtractor.file_context import FileContext
 from DyldExtractor.macho.macho_context import MachOContext
-
 from DyldExtractor.dyld.dyld_context import DyldContext
-
 from DyldExtractor.extraction_context import ExtractionContext
 
 from DyldExtractor.converter import (
@@ -22,9 +27,48 @@ from DyldExtractor.converter import (
 )
 
 
+class _DyldExtractorArgs(argparse.Namespace):
+
+	dyld_path: pathlib.Path
+	jobs: int
+	pass
+
+
 class _DummyProgressBar(object):
 	def update(*args, **kwargs):
 		pass
+
+
+def _openSubCaches(
+	mainCachePath: str,
+	numSubCaches: int
+) -> Tuple[List[FileContext], List[BinaryIO]]:
+	"""Create FileContext objects for each sub cache.
+
+	Assumes that each sub cache has the same base name as the
+	main cache, and that the suffixes are preserved.
+
+	Also opens the symbols cache, and adds it to the end of
+	the list.
+
+	Returns:
+		A list of subcaches, and their file objects, which must be closed!
+	"""
+	subCaches = []
+	subCachesFiles = []
+
+	subCacheSuffixes = [i for i in range(1, numSubCaches + 1)]
+	subCacheSuffixes.append("symbols")
+	for cacheSuffix in subCacheSuffixes:
+		subCachePath = f"{mainCachePath}.{cacheSuffix}"
+		cacheFileObject = open(subCachePath, mode="rb")
+		cacheFileCtx = FileContext(cacheFileObject)
+
+		subCaches.append(cacheFileCtx)
+		subCachesFiles.append(cacheFileObject)
+		pass
+
+	return subCaches, subCachesFiles
 
 
 def _imageRunner(dyldPath: str, imageIndex: int) -> None:
@@ -46,29 +90,63 @@ def _imageRunner(dyldPath: str, imageIndex: int) -> None:
 
 	# process the image
 	with open(dyldPath, "rb") as f:
-		dyldFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-		dyldCtx = DyldContext(dyldFile)
-		imageOffset = dyldCtx.convertAddr(dyldCtx.images[imageIndex].address)
+		dyldFileCtx = FileContext(f)
+		dyldCtx = DyldContext(dyldFileCtx)
 
-		machoFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_COPY)
-		machoCtx = MachOContext(machoFile, imageOffset)
-
-		extractionCtx = ExtractionContext(
-			dyldCtx,
-			machoCtx,
-			_DummyProgressBar(),
-			logger
-		)
-
+		subCacheFiles: List[BinaryIO] = []
 		try:
+			# add sub caches if there are any
+			if dyldCtx.hasSubCaches():
+				subCacheFileCtxs, subCacheFiles = _openSubCaches(
+					dyldPath,
+					dyldCtx.header.numSubCaches
+				)
+				dyldCtx.addSubCaches(subCacheFileCtxs)
+				pass
+
+			machoOffset, context = dyldCtx.convertAddr(
+				dyldCtx.images[imageIndex].address
+			)
+			machoCtx = MachOContext(
+				context.fileCtx.makeCopy(copyMode=True),
+				machoOffset
+			)
+
+			# Add sub caches if necessary
+			if dyldCtx.hasSubCaches():
+				mappings = dyldCtx.mappings
+				mainFileMap = next(
+					(mapping[0] for mapping in mappings if mapping[1] == context)
+				)
+				machoCtx.addSubfiles(
+					mainFileMap,
+					((m, ctx.fileCtx.makeCopy(copyMode=True)) for m, ctx in mappings)
+				)
+				pass
+
+			extractionCtx = ExtractionContext(
+				dyldCtx,
+				machoCtx,
+				_DummyProgressBar(),
+				logger
+			)
+
 			# TODO: implement a way to select convertors
 			slide_info.processSlideInfo(extractionCtx)
 			linkedit_optimizer.optimizeLinkedit(extractionCtx)
 			stub_fixer.fixStubs(extractionCtx)
 			objc_fixer.fixObjC(extractionCtx)
 			macho_offset.optimizeOffsets(extractionCtx)
+
 		except Exception as e:
 			logger.exception(e)
+			pass
+
+		finally:
+			for file in subCacheFiles:
+				file.close()
+				pass
+			pass
 		pass
 
 	# cleanup
@@ -90,16 +168,20 @@ if "__main__" == __name__:
 		type=pathlib.Path,
 		help="A path to the target DYLD cache."
 	)
-	args = parser.parse_args()
+	parser.add_argument(
+		"-j", "--jobs", type=int, default=mp.cpu_count(),
+		help="Number of jobs to run simultaneously."  # noqa
+	)
+	args = parser.parse_args(namespace=_DyldExtractorArgs)
 
 	# create a list of images
 	images: list[str] = []
 	with open(args.dyld_path, "rb") as f:
-		dyldFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-		dyldCtx = DyldContext(dyldFile)
+		dyldFileCtx = FileContext(f)
+		dyldCtx = DyldContext(dyldFileCtx)
 
 		for index, image in enumerate(dyldCtx.images):
-			imagePath = dyldCtx.readString(image.pathFileOffset)[0:-1]
+			imagePath = dyldCtx.fileCtx.readString(image.pathFileOffset)[0:-1]
 			imagePath = imagePath.decode("utf-8")
 			imageName = imagePath.split("/")[-1]
 
@@ -107,7 +189,7 @@ if "__main__" == __name__:
 		pass
 
 	summary = ""
-	with mp.Pool(initializer=_workerInitializer) as pool:
+	with mp.Pool(args.jobs, initializer=_workerInitializer) as pool:
 		# create jobs for each image
 		jobs: list[tuple[str, mp.pool.AsyncResult]] = []
 		for index, imageName in enumerate(images):
