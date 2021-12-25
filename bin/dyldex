@@ -160,9 +160,9 @@ def _extractImage(
 
 		extractionCtx = ExtractionContext(dyldCtx, machoCtx, statusBar, logger)
 
-		# slide_info.processSlideInfo(extractionCtx)
+		slide_info.processSlideInfo(extractionCtx)
 		linkedit_optimizer.optimizeLinkedit(extractionCtx)
-		# stub_fixer.fixStubs(extractionCtx)
+		stub_fixer.fixStubs(extractionCtx)
 		objc_fixer.fixObjC(extractionCtx)
 
 		writeProcedures = macho_offset.optimizeOffsets(extractionCtx)
