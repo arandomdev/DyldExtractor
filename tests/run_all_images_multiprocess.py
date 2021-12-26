@@ -180,7 +180,7 @@ if "__main__" == __name__:
 		dyldFileCtx = FileContext(f)
 		dyldCtx = DyldContext(dyldFileCtx)
 
-		for index, image in enumerate(dyldCtx.images):
+		for index, image in enumerate(dyldCtx.images[2000:], 2000):
 			imagePath = dyldCtx.fileCtx.readString(image.pathFileOffset)[0:-1]
 			imagePath = imagePath.decode("utf-8")
 			imageName = imagePath.split("/")[-1]

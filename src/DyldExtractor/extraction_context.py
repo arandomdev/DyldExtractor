@@ -26,6 +26,11 @@ class ExtractionContext(object):
 	"""
 	hasRedactedIndirect: bool = False
 
+	# The name of the extra data segment
+	# And an out of file location to store it.
+	EXTRA_SEGMENT_NAME = b"__EXTRA_OBJC"
+	extraSegmentData: bytes
+
 	def __init__(
 		self,
 		dyldCtx: DyldContext,

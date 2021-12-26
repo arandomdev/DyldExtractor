@@ -1,7 +1,6 @@
 from mmap import mmap
 from typing import List, Dict
 
-from DyldExtractor.structure import Structure
 
 from DyldExtractor.macho.macho_structs import (
 	segment_command_64,

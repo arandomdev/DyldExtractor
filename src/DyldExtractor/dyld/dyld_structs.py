@@ -4,9 +4,7 @@ This is mainly sourced from
 https://opensource.apple.com/source/dyld/dyld-832.7.3/dyld3/shared-cache/dyld_cache_format.h.auto.html
 """
 
-import struct
 import sys
-from enum import IntEnum
 from ctypes import (
 	c_char,
 	c_uint8,

@@ -22,7 +22,6 @@ from DyldExtractor.dyld.dyld_structs import (
 	dyld_cache_slide_pointer3
 )
 
-from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.macho.macho_structs import (
 	segment_command_64
 )

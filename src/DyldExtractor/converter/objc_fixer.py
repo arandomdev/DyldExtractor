@@ -24,13 +24,14 @@ from DyldExtractor.objc.objc_structs import (
 	objc_protocol_t
 )
 
-from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.macho.macho_structs import (
 	LoadCommands,
 	linkedit_data_command,
 	mach_header_64,
 	segment_command_64
 )
+
+from DyldExtractor.dyld.dyld_structs import dyld_cache_mapping_info
 
 
 # Change modify the disasm_lite to accept an offset
@@ -252,11 +253,10 @@ class _ObjCSelectorFixer(object):
 		self,
 		startIdx: int,
 		adrpReg: str,
-		_processed: Set[int] = None
 	) -> Set[int]:
 		"""Find ADD instructions given an ADRP register.
 
-		This will recursively follow branches and stop
+		This will iteratively follow branches and stop
 		when the ADRP range ends.
 
 		Args:
@@ -265,98 +265,92 @@ class _ObjCSelectorFixer(object):
 			A list of indices to the ADD instructions.
 		"""
 
-		# Keep track of start indexes that are already processed
-		if _processed is None:
-			_processed = {startIdx}
-			pass
-		else:
-			if startIdx in _processed:
-				return set()
-			else:
-				_processed.add(startIdx)
-			pass
-
 		addIdxs = set()
-		i = startIdx
 
-		while i < len(self._textInstr) and i >= 0:
-			address, mnemonic, opcodes = self._textInstr[i]
+		# set of indexes that are or being processed
+		processedIdx = set()
 
-			# check if the ADRP dest reg matches the base reg for the ADD
-			if mnemonic == "add" and opcodes[1] == adrpReg:
-				addIdxs.add(i)
-				pass
+		# list of indices that need to be processed
+		startIndices = [startIdx]
 
-			# If there is an unconditional branch, and it points
-			# within the text section, follow it. If it does not
-			# point within the text section, end the ADRP range.
-			if mnemonic == "b":
-				branchAddr = int(opcodes[0][1:], 16)
-				idxDelta = int((branchAddr - address) / 4)
-				i += idxDelta
-
-				if i in _processed:
-					break
-				else:
-					_processed.add(i)
-
-				if i < 0 or i >= len(self._textInstr):
-					break
+		while len(startIndices):
+			i = startIndices.pop()
+			if i in processedIdx:
 				continue
-
-			# If there is a conditional branch, follow it and continue
-			if mnemonic[0:2] == "b.":
-				branchAddr = int(opcodes[0][1:], 16)
-				idxDelta = int((branchAddr - address) / 4)
-				addIdxs.update(
-					self._findAddInstructions(i + idxDelta, adrpReg, _processed=_processed)
-				)
-				pass
-			elif mnemonic == "cbz" or mnemonic == "cbnz":
-				branchAddr = int(opcodes[1][1:], 16)
-				idxDelta = int((branchAddr - address) / 4)
-				addIdxs.update(
-					self._findAddInstructions(i + idxDelta, adrpReg, _processed=_processed)
-				)
-				pass
-			elif mnemonic == "tbz" or mnemonic == "tbnz":
-				branchAddr = int(opcodes[2][1:], 16)
-				idxDelta = int((branchAddr - address) / 4)
-				addIdxs.update(
-					self._findAddInstructions(i + idxDelta, adrpReg, _processed=_processed)
-				)
+			else:
+				processedIdx.add(i)
 				pass
 
-			# End the ADRP range if the function returns
-			if mnemonic in (
-				"ret",
-				"retaa",
-				"retab"
-			):
-				break
+			while i < len(self._textInstr) and i >= 0:
+				address, mnemonic, opcodes = self._textInstr[i]
 
-			# If we find an instruction modifying the register,
-			# the adrp range probably ended.
-			if adrpReg == opcodes[0]:
-				break
+				# check if the ADRP dest reg matches the base reg for the ADD
+				if mnemonic == "add" and opcodes[1] == adrpReg:
+					addIdxs.add(i)
+					pass
 
-			# These instructions modify 2 registers.
-			if mnemonic in (
-				"ldaxp",
-				"ldnp",
-				"ldpsw",
-				"ldxp",
-				"stlxp",
-				"stnp",
-				"stp",
-				"stxp",
-				"ldp"
-			):
-				if adrpReg == opcodes[1]:
+				# If there is an unconditional branch, and it points
+				# within the text section, follow it. If it does not
+				# point within the text section, end the ADRP range.
+				if mnemonic == "b":
+					branchAddr = int(opcodes[0][1:], 16)
+					idxDelta = int((branchAddr - address) / 4)
+					i += idxDelta
+
+					if i < 0 or i >= len(self._textInstr):
+						break
+
+					startIndices.append(i)
 					break
-				pass
 
-			i += 1
+				# If there is a conditional branch, follow it and continue
+				elif mnemonic[0:2] == "b.":
+					branchAddr = int(opcodes[0][1:], 16)
+					idxDelta = int((branchAddr - address) / 4)
+					startIndices.append(i + idxDelta)
+					pass
+				elif mnemonic == "cbz" or mnemonic == "cbnz":
+					branchAddr = int(opcodes[1][1:], 16)
+					idxDelta = int((branchAddr - address) / 4)
+					startIndices.append(i + idxDelta)
+					pass
+				elif mnemonic == "tbz" or mnemonic == "tbnz":
+					branchAddr = int(opcodes[2][1:], 16)
+					idxDelta = int((branchAddr - address) / 4)
+					startIndices.append(i + idxDelta)
+					pass
+
+				# End the ADRP range if the function returns
+				if mnemonic in (
+					"ret",
+					"retaa",
+					"retab"
+				):
+					break
+
+				# If we find an instruction modifying the register,
+				# the adrp range probably ended.
+				if adrpReg == opcodes[0]:
+					break
+
+				# These instructions modify 2 registers.
+				if mnemonic in (
+					"ldaxp",
+					"ldnp",
+					"ldpsw",
+					"ldxp",
+					"stlxp",
+					"stnp",
+					"stp",
+					"stxp",
+					"ldp"
+				):
+					if adrpReg == opcodes[1]:
+						break
+					pass
+
+				i += 1
+				pass
 			pass
 
 		return addIdxs
@@ -475,11 +469,9 @@ class _ObjCFixer(object):
 			raise _ObjCFixerError("Unable to find space for the extra ObjC segment.")
 
 		# Get a starting address for the new segment
+		leftSegOff = self._dyldCtx.convertAddr(leftSeg.vmaddr)[0]
 		newSegStartAddr = (leftSeg.vmaddr + leftSeg.vmsize + 0x1000) & ~0xFFF
-		newSegStartOff = (
-			self._dyldCtx.convertAddr(leftSeg.vmaddr)[0] + leftSeg.vmsize
-			+ 0x1000
-		) & ~0xFFF
+		newSegStartOff = (leftSegOff + leftSeg.vmsize + 0x1000) & ~0xFFF
 
 		# adjust max gap size to account for page alignment
 		maxGapSize -= newSegStartAddr - (leftSeg.vmaddr + leftSeg.vmsize)
@@ -488,7 +480,7 @@ class _ObjCFixer(object):
 		newSegment = segment_command_64()
 		newSegment.cmd = LoadCommands.LC_SEGMENT_64
 		newSegment.cmdsize = segment_command_64.SIZE  # no sections
-		newSegment.segname = b"__EXTRA_OBJC"
+		newSegment.segname = self._extractionCtx.EXTRA_SEGMENT_NAME
 		newSegment.vmaddr = newSegStartAddr
 		newSegment.fileoff = newSegStartOff
 		newSegment.maxprot = 3  # read and write
@@ -1040,7 +1032,6 @@ class _ObjCFixer(object):
 		# fix relative pointers after we reserve a new address for the method list
 		# contains a list of tuples of field offsets and their target addresses
 		relativeFixups: list[tuple[int, int]] = []
-
 		for i in range(methodListDef.count):
 			methodAddr = (
 				methodListAddr
@@ -1054,10 +1045,13 @@ class _ObjCFixer(object):
 
 				if methodDef.name:
 					nameAddr = methodAddr + methodDef.name
-					newNameAddr = self._processString(nameAddr)
-					methodDef.name = newNameAddr - methodAddr
+					if (newNameAddr := self._processString(nameAddr)) is not None:
+						methodDef.name = newNameAddr - methodAddr
 
-					relativeFixups.append((methodOff, newNameAddr))
+						relativeFixups.append((methodOff, newNameAddr))
+					else:
+						methodDef.name = 0
+						self._logger.warning(f"Unable to get string for method at {hex(methodAddr)}")  # noqa
 					pass
 
 				if methodDef.types:
@@ -1128,7 +1122,10 @@ class _ObjCFixer(object):
 		else:
 			newStringAddr = self._extraDataHead
 
-			stringOff, ctx = self._dyldCtx.convertAddr(stringAddr)
+			stringOff, ctx = self._dyldCtx.convertAddr(stringAddr) or (None, None)
+			if not stringOff:
+				return None
+
 			stringData = ctx.fileCtx.readString(stringOff)
 			self._addExtraData(stringData)
 			pass
@@ -1259,9 +1256,10 @@ class _ObjCFixer(object):
 		pass
 
 	def _addExtraDataSeg(self) -> None:
-		# update the size on the new segment
-		self._extraSegment.vmsize = len(self._extraData)
-		self._extraSegment.filesize = len(self._extraData)
+		# update the size on the new segment and mappings
+		extraDataLen = len(self._extraData)
+		self._extraSegment.vmsize = extraDataLen
+		self._extraSegment.filesize = extraDataLen
 
 		# insert the segment command right before the linkedit
 		moveStart = self._machoCtx.segments[b"__LINKEDIT"].seg._fileOff_
@@ -1279,16 +1277,8 @@ class _ObjCFixer(object):
 
 		self._machoCtx.fileCtx.writeBytes(moveStart, self._extraSegment)
 
-		# add the new data and the segment command
-		file = self._machoCtx.fileForAddr(self._extraSegment.vmaddr)
-		if not file:
-			self._logger.error("Encountered edge case when adding extra data!")
-			return
-
-		file.writeBytes(
-			self._extraSegment.fileoff,
-			self._extraData
-		)
+		# update the extraction context
+		self._extractionCtx.extraSegmentData = self._extraData
 
 		# update the header
 		self._machoCtx.header.ncmds += 1

@@ -29,6 +29,19 @@ class WriteProcedure(object):
 	"""The file to read from."""
 
 
+class BytesFileContext(object):
+	"""Create a FileContext like object for bytes"""
+
+	def __init__(self, buffer: bytes) -> None:
+		super().__init__()
+		self._buffer = buffer
+		pass
+
+	def getBytes(self, offset: int, size: int) -> bytes:
+		return self._buffer[offset:offset + size]
+	pass
+
+
 def _updateLinkEdit(
 	machoCtx: MachOContext,
 	shiftDelta: int
@@ -90,12 +103,22 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> List[WriteProcedure]:
 	for segname, segment in machoCtx.segments.items():
 		shiftDelta = dataHead - segment.seg.fileoff
 
-		procedure = WriteProcedure(
-			segment.seg.fileoff + shiftDelta,
-			dyldCtx.convertAddr(segment.seg.vmaddr)[0],
-			segment.seg.filesize,
-			machoCtx.fileForAddr(segment.seg.vmaddr)
-		)
+		if segname == extractionCtx.EXTRA_SEGMENT_NAME:
+			procedure = WriteProcedure(
+				segment.seg.fileoff + shiftDelta,
+				0,
+				segment.seg.filesize,
+				BytesFileContext(extractionCtx.extraSegmentData)
+			)
+			pass
+		else:
+			procedure = WriteProcedure(
+				segment.seg.fileoff + shiftDelta,
+				dyldCtx.convertAddr(segment.seg.vmaddr)[0],
+				segment.seg.filesize,
+				machoCtx.fileForAddr(segment.seg.vmaddr)
+			)
+			pass
 		writeProcedures.append(procedure)
 
 		if segname == b"__LINKEDIT":
