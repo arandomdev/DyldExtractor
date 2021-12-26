@@ -1045,14 +1045,16 @@ class _ObjCFixer(object):
 
 				if methodDef.name:
 					nameAddr = methodAddr + methodDef.name
-					if (newNameAddr := self._processString(nameAddr)) is not None:
+					if (newNameAddr := self._processString(nameAddr, _logString=False)) is not None:
 						methodDef.name = newNameAddr - methodAddr
 
 						relativeFixups.append((methodOff, newNameAddr))
 					else:
 						methodDef.name = 0
-						self._logger.warning(f"Unable to get string for method at {hex(methodAddr)}")  # noqa
+						self._logger.warning(f"Unable to get string at {hex(nameAddr)}, for method def at {hex(methodAddr)}")  # noqa
 					pass
+				else:
+					self._logger.debug("Null method name")
 
 				if methodDef.types:
 					typesAddr = methodAddr + 4 + methodDef.types
@@ -1111,7 +1113,7 @@ class _ObjCFixer(object):
 		self._methodListCache[methodListAddr] = newMethodListAddr
 		return newMethodListAddr
 
-	def _processString(self, stringAddr: int) -> int:
+	def _processString(self, stringAddr: int, _logString=False) -> int:
 		if stringAddr in self._stringCache:
 			return self._stringCache[stringAddr]
 
@@ -1128,6 +1130,9 @@ class _ObjCFixer(object):
 
 			stringData = ctx.fileCtx.readString(stringOff)
 			self._addExtraData(stringData)
+
+			if _logString:
+				self._logger.debug(stringData)
 			pass
 
 		self._stringCache[stringAddr] = newStringAddr

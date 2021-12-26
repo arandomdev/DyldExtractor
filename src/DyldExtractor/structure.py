@@ -38,6 +38,8 @@ class Structure(ctypes.LittleEndianStructure):
 
 			if isinstance(fieldData, ctypes.Array):
 				fieldData = list(fieldData)
+			elif isinstance(fieldData, int):
+				fieldData = hex(fieldData)
 
 			string += f"\n\t{field[0]}: {fieldData}"
 
