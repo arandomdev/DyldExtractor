@@ -24,14 +24,13 @@ from DyldExtractor.objc.objc_structs import (
 	objc_protocol_t
 )
 
+from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.macho.macho_structs import (
 	LoadCommands,
 	linkedit_data_command,
 	mach_header_64,
 	segment_command_64
 )
-
-from DyldExtractor.dyld.dyld_structs import dyld_cache_mapping_info
 
 
 # Change modify the disasm_lite to accept an offset
@@ -399,6 +398,30 @@ class _ObjCFixer(object):
 
 		self._createExtraSegment()
 
+		# Get __OBJC_RO from the libobjc.A.dylib image
+		for image in self._dyldCtx.images:
+			path = self._dyldCtx.fileCtx.readString(image.pathFileOffset)
+			if b"libobjc.A.dylib" in path:
+				offset, ctx = self._dyldCtx.convertAddr(image.address)
+				libobjcImage = MachOContext(ctx.fileCtx, offset)
+				if b"__OBJC_RO" in libobjcImage.segments:
+					self._objcRoSeg = libobjcImage.segments[b"__OBJC_RO"].seg
+					self._objcRwSeg = libobjcImage.segments[b"__OBJC_RW"].seg
+				else:
+					self._logger.error("libobjc does not contain __OBJC_RO")
+					return
+				break
+			pass
+		else:
+			self._logger.error("Unable to find libobjc.A.dylib")
+			return
+
+		self._objcRoRelativeNames = self._getMethodNameStorage()
+		if not self._objcRoRelativeNames:
+			print("Not using objc_ro")
+			pass
+		# return
+
 		# caches that map the original definition address
 		# to its new processed address.
 		self._categoryCache: Dict[int, int] = {}
@@ -432,6 +455,62 @@ class _ObjCFixer(object):
 		self._checkSpaceConstraints()
 		self._addExtraDataSeg()
 		pass
+
+	def _getMethodNameStorage(self) -> bool:
+		"""Check where method names are stored.
+
+		Starting around iOS 15, relative method names
+		pointers are relative to the start of the __OBJC_RO of
+		libobjc, instead of being relative to itself.
+		This tries to detect which is being used.
+
+		Returns:
+			A bool that determines if the method names
+			are relative to the __OBJC_RO.
+		"""
+
+		# TODO: Maybe there is a better way to detect this
+
+		# Get a method list
+		methodListAddr = None
+		for seg in self._machoCtx.segmentsI:
+			for sect in seg.sectsI:
+				if sect.segname == b"__objc_methlist":
+					methodListAddr = sect.addr
+					break
+				pass
+			if methodListAddr:
+				break
+			pass
+
+		if methodListAddr is None:
+			self._logger.warning("Unable to determine the type of method name addressing")  # noqa
+			return False
+
+		methodListDef = self._slider.slideStruct(methodListAddr, objc_method_list_t)
+		if methodListDef.entsize == objc_method_large_t.SIZE:
+			# TODO: probably want to test at least 2 method lists
+			return False
+
+		for i in range(methodListDef.count):
+			methodAddr = (
+				methodListAddr
+				+ objc_method_list_t.SIZE
+				+ (i * methodListDef.entsize)
+			)
+			methodDef = self._slider.slideStruct(methodAddr, objc_method_small_t)
+
+			# test if the offset is negative or greater than __OBJC_RO's size
+			if methodDef.name <= 0 or methodDef.name > self._objcRoSeg.vmsize:
+				return False
+
+			# if the offset results in a string with non ascii characters
+			nameOff, ctx = self._dyldCtx.convertAddr(methodAddr + methodDef.name)
+			name = ctx.fileCtx.readString(nameOff)
+			if not all(c < 128 for c in name):
+				return True
+
+		return False
 
 	def _createExtraSegment(self) -> None:
 		"""Create an extra segment to store data in.
@@ -1029,6 +1108,14 @@ class _ObjCFixer(object):
 			self._logger.error(f"Large method list at {hex(methodListAddr)}, has an entsize that doesn't match the size of objc_method_large_t")  # noqa
 			return 0
 
+		if (
+			methodListAddr >= self._objcRoSeg.vmaddr
+			and methodListAddr < self._objcRoSeg.vmaddr + self._objcRoSeg.vmsize
+		):
+			pass
+		else:
+			self._logger.debug("method list outside")
+
 		# fix relative pointers after we reserve a new address for the method list
 		# contains a list of tuples of field offsets and their target addresses
 		relativeFixups: list[tuple[int, int]] = []
@@ -1045,13 +1132,13 @@ class _ObjCFixer(object):
 
 				if methodDef.name:
 					nameAddr = methodAddr + methodDef.name
-					if (newNameAddr := self._processString(nameAddr, _logString=False)) is not None:
+					if (newNameAddr := self._processString(nameAddr)) is not None:
 						methodDef.name = newNameAddr - methodAddr
 
 						relativeFixups.append((methodOff, newNameAddr))
 					else:
 						methodDef.name = 0
-						self._logger.warning(f"Unable to get string at {hex(nameAddr)}, for method def at {hex(methodAddr)}")  # noqa
+						# self._logger.warning(f"Unable to get string at {hex(nameAddr)}, for method def at {hex(methodAddr)}")  # noqa
 					pass
 				else:
 					self._logger.debug("Null method name")
@@ -1113,7 +1200,7 @@ class _ObjCFixer(object):
 		self._methodListCache[methodListAddr] = newMethodListAddr
 		return newMethodListAddr
 
-	def _processString(self, stringAddr: int, _logString=False) -> int:
+	def _processString(self, stringAddr: int) -> int:
 		if stringAddr in self._stringCache:
 			return self._stringCache[stringAddr]
 
@@ -1130,9 +1217,6 @@ class _ObjCFixer(object):
 
 			stringData = ctx.fileCtx.readString(stringOff)
 			self._addExtraData(stringData)
-
-			if _logString:
-				self._logger.debug(stringData)
 			pass
 
 		self._stringCache[stringAddr] = newStringAddr
