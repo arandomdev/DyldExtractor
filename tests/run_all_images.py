@@ -50,6 +50,7 @@ def runForAllImages(
 		if index == stopIndex:
 			break
 
+		# TODO: Imp sub caches
 		imageOffset = dyldCtx.convertAddr(imageData.address)
 		imagePath = dyldCtx.fileCtx.readString(imageData.pathFileOffset)[0:-1]
 		imagePath = imagePath.decode("utf-8")

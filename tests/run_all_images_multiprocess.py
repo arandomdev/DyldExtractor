@@ -1,6 +1,5 @@
 import multiprocessing as mp
 import signal
-import mmap
 import logging
 import io
 import progressbar

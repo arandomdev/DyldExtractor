@@ -32,8 +32,6 @@ from DyldExtractor.converter import (
 	objc_fixer
 )
 
-import psutil
-
 
 class _DyldExtractorArgs(argparse.Namespace):
 
@@ -180,9 +178,6 @@ def _extractImage(
 				)
 				pass
 			pass
-
-		process = psutil.Process(os.getpid())
-		print(process.memory_info().rss)  # in bytes
 
 		statusBar.update(unit="Extractor", status="Done")
 
