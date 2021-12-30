@@ -586,10 +586,10 @@ def optimizeLinkedit(extractionCtx: ExtractionContext) -> None:
 
 	optimizer = _LinkeditOptimizer(extractionCtx)
 
-	optimizer.copyWeakBindingInfo(newLinkedit)
-	optimizer.copyExportInfo(newLinkedit)
 	optimizer.copyBindingInfo(newLinkedit)
+	optimizer.copyWeakBindingInfo(newLinkedit)
 	optimizer.copyLazyBindingInfo(newLinkedit)
+	optimizer.copyExportInfo(newLinkedit)
 
 	# copy symbol entries
 	optimizer.startSymbolContext(newLinkedit)
