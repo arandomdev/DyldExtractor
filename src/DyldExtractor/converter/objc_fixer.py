@@ -1,7 +1,13 @@
 import struct
 import ctypes
-from typing import List, Set, Dict, Tuple
 import capstone as cp
+from typing import (
+	List,
+	Set,
+	Dict,
+	Tuple,
+	Generator
+)
 
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.converter import (
@@ -398,29 +404,19 @@ class _ObjCFixer(object):
 
 		self._createExtraSegment()
 
-		# Get __OBJC_RO from the libobjc.A.dylib image
+		# Get the libobjc.A.dylib image
 		for image in self._dyldCtx.images:
 			path = self._dyldCtx.fileCtx.readString(image.pathFileOffset)
 			if b"libobjc.A.dylib" in path:
 				offset, ctx = self._dyldCtx.convertAddr(image.address)
-				libobjcImage = MachOContext(ctx.fileCtx, offset)
-				if b"__OBJC_RO" in libobjcImage.segments:
-					self._objcRoSeg = libobjcImage.segments[b"__OBJC_RO"].seg
-					self._objcRwSeg = libobjcImage.segments[b"__OBJC_RW"].seg
-				else:
-					self._logger.error("libobjc does not contain __OBJC_RO")
-					return
+				self._libobjcImage = MachOContext(ctx.fileCtx, offset)
 				break
 			pass
 		else:
 			self._logger.error("Unable to find libobjc.A.dylib")
 			return
 
-		self._objcRoRelativeNames = self._getMethodNameStorage()
-		if not self._objcRoRelativeNames:
-			print("Not using objc_ro")
-			pass
-		# return
+		self._checkMethodNameStorage()
 
 		# caches that map the original definition address
 		# to its new processed address.
@@ -434,6 +430,7 @@ class _ObjCFixer(object):
 		self._methodListCache: Dict[int, int] = {}
 		self._stringCache: Dict[int, int] = {}
 		self._intCache: Dict[int, int] = {}
+		self._methodNameCache: Dict[int, int] = {}
 
 		# connects a selrefs old target to its pointer address
 		self._selRefCache: Dict[int, int] = {}
@@ -456,61 +453,110 @@ class _ObjCFixer(object):
 		self._addExtraDataSeg()
 		pass
 
-	def _getMethodNameStorage(self) -> bool:
+	def _checkMethodNameStorage(self) -> None:
 		"""Check where method names are stored.
 
 		Starting around iOS 15, relative method names
 		pointers are relative to the start of the __OBJC_RO of
 		libobjc, instead of being relative to itself.
 		This tries to detect which is being used.
-
-		Returns:
-			A bool that determines if the method names
-			are relative to the __OBJC_RO.
 		"""
 
-		# TODO: Maybe there is a better way to detect this
+		self._usesObjcRoRelativeNames = False
+		self._optMethodNamesAddr = None
 
-		# Get a method list
-		methodListAddr = None
-		for seg in self._machoCtx.segmentsI:
+		# Get __objc_scoffs, __objc_classlist
+		objcScoffs = None
+		objcClasslist = None
+		for seg in self._libobjcImage.segmentsI:
 			for sect in seg.sectsI:
-				if sect.segname == b"__objc_methlist":
-					methodListAddr = sect.addr
-					break
+				if sect.sectname == b"__objc_scoffs":
+					objcScoffs = sect
+					pass
+				elif sect.sectname == b"__objc_classlist":
+					objcClasslist = sect
+					pass
 				pass
-			if methodListAddr:
+
+			if objcScoffs and objcClasslist:
 				break
 			pass
 
-		if methodListAddr is None:
-			self._logger.warning("Unable to determine the type of method name addressing")  # noqa
-			return False
+		if objcScoffs is None:
+			# Older caches do not have this
+			return
+		elif objcClasslist is None:
+			self._logger.error("libobjc does not have __objc_classlist")
+			return
 
-		methodListDef = self._slider.slideStruct(methodListAddr, objc_method_list_t)
-		if methodListDef.entsize == objc_method_large_t.SIZE:
-			# TODO: probably want to test at least 2 method lists
-			return False
+		# Parse __objc_scoffs
+		if objcScoffs.size == 0x20:
+			# Just 4 pointers, starting with methods start and methods end
+			self._optMethodNamesAddr = self._slider.slideAddress(objcScoffs.addr)
+			_optMethodNamesEnd = self._slider.slideAddress(objcScoffs.addr + 8)
+			pass
+		elif objcScoffs.size == 0x28:
+			# First the version number and then pointers
+			verOff, ctx = self._dyldCtx.convertAddr(objcScoffs.addr)
+			version = ctx.fileCtx.readFormat("<Q", verOff)[0]
+			if version != 2:
+				self._logger.warning(f"Unknown objc opt version: {version}")
+				pass
 
-		for i in range(methodListDef.count):
-			methodAddr = (
-				methodListAddr
-				+ objc_method_list_t.SIZE
-				+ (i * methodListDef.entsize)
-			)
-			methodDef = self._slider.slideStruct(methodAddr, objc_method_small_t)
+			self._optMethodNamesAddr = self._slider.slideAddress(objcScoffs.addr + 8)
+			_optMethodNamesEnd = self._slider.slideAddress(objcScoffs.addr + 16)
+			pass
+		else:
+			self._logger.error("Unable to parse objc scoffs")
+			return
 
-			# test if the offset is negative or greater than __OBJC_RO's size
-			if methodDef.name <= 0 or methodDef.name > self._objcRoSeg.vmsize:
-				return False
+		optMethodNamesSize = _optMethodNamesEnd - self._optMethodNamesAddr
 
-			# if the offset results in a string with non ascii characters
-			nameOff, ctx = self._dyldCtx.convertAddr(methodAddr + methodDef.name)
-			name = ctx.fileCtx.readString(nameOff)
-			if not all(c < 128 for c in name):
-				return True
+		# Create a generator to get method lists
+		def getMethodLists() -> Generator[int, None, None]:
+			for ptrAddr in range(
+				objcClasslist.addr,
+				objcClasslist.addr + objcClasslist.size,
+				8
+			):
+				classAddr = self._slider.slideAddress(ptrAddr)
+				classDef = self._slider.slideStruct(classAddr, objc_class_t)
+				classDataDef = self._slider.slideStruct(
+					classDef.data & ~0x3,
+					objc_class_data_t
+				)
 
-		return False
+				if classDataDef.baseMethods:
+					yield classDataDef.baseMethods
+				pass
+			pass
+
+		for methodListAddr in getMethodLists():
+			methodListDef = self._slider.slideStruct(methodListAddr, objc_method_list_t)
+
+			# Try to find an objc_method_small_t
+			entsize = methodListDef.getEntsize()
+			if (
+				entsize != objc_method_small_t.SIZE
+				or not methodListDef.usesRelativeMethods()
+			):
+				methodListAddr += (
+					objc_method_list_t.SIZE
+					+ (methodListDef.count * entsize)
+				)
+				continue
+
+			# Test the first method
+			methodAddr = methodListAddr + objc_method_list_t.SIZE
+			nameOff, ctx = self._dyldCtx.convertAddr(methodAddr)
+			name = ctx.fileCtx.readFormat("<i", nameOff)[0]
+
+			# TODO: Hopefully there is a better way to detect this.
+			if name >= 0 and name < optMethodNamesSize:
+				self._usesObjcRoRelativeNames = True
+				pass
+			return
+		return
 
 	def _createExtraSegment(self) -> None:
 		"""Create an extra segment to store data in.
@@ -1108,14 +1154,6 @@ class _ObjCFixer(object):
 			self._logger.error(f"Large method list at {hex(methodListAddr)}, has an entsize that doesn't match the size of objc_method_large_t")  # noqa
 			return 0
 
-		if (
-			methodListAddr >= self._objcRoSeg.vmaddr
-			and methodListAddr < self._objcRoSeg.vmaddr + self._objcRoSeg.vmsize
-		):
-			pass
-		else:
-			self._logger.debug("method list outside")
-
 		# fix relative pointers after we reserve a new address for the method list
 		# contains a list of tuples of field offsets and their target addresses
 		relativeFixups: list[tuple[int, int]] = []
@@ -1131,17 +1169,20 @@ class _ObjCFixer(object):
 				methodOff = objc_method_list_t.SIZE + (i * entsize)
 
 				if methodDef.name:
-					nameAddr = methodAddr + methodDef.name
-					if (newNameAddr := self._processString(nameAddr)) is not None:
-						methodDef.name = newNameAddr - methodAddr
-
-						relativeFixups.append((methodOff, newNameAddr))
+					if self._usesObjcRoRelativeNames:
+						baseAddr = self._optMethodNamesAddr
+						pass
 					else:
-						methodDef.name = 0
-						# self._logger.warning(f"Unable to get string at {hex(nameAddr)}, for method def at {hex(methodAddr)}")  # noqa
+						baseAddr = methodAddr
+						pass
+
+					nameAddr = baseAddr + methodDef.name
+					newNamePtr = self._processMethodName(nameAddr)
+
+					# make the name ptr relative to itself
+					methodDef.name = newNamePtr - methodAddr
+					relativeFixups.append((methodOff, newNamePtr))
 					pass
-				else:
-					self._logger.debug("Null method name")
 
 				if methodDef.types:
 					typesAddr = methodAddr + 4 + methodDef.types
@@ -1240,6 +1281,26 @@ class _ObjCFixer(object):
 
 		self._intCache[intAddr] = newIntAddr
 		return newIntAddr
+
+	def _processMethodName(self, stringAddr: int) -> int:
+		"""Process a method name.
+
+		Returns:
+			A the address of the pointer that points
+			to the method string.
+		"""
+
+		if stringAddr in self._methodNameCache:
+			return self._methodNameCache[stringAddr]
+
+		# TODO: search selrefs first
+		newStringAddr = self._processString(stringAddr)
+		ptrAddr = self._extraDataHead
+
+		self._addExtraData(struct.pack("<Q", newStringAddr))
+
+		self._methodNameCache[stringAddr] = ptrAddr
+		return ptrAddr
 
 	def _finalizeFutureClasses(self) -> None:
 		extraSegStart = self._extraDataHead - len(self._extraData)

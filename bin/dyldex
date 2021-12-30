@@ -32,6 +32,8 @@ from DyldExtractor.converter import (
 	objc_fixer
 )
 
+import psutil
+
 
 class _DyldExtractorArgs(argparse.Namespace):
 
@@ -163,7 +165,7 @@ def _extractImage(
 		slide_info.processSlideInfo(extractionCtx)
 		linkedit_optimizer.optimizeLinkedit(extractionCtx)
 		stub_fixer.fixStubs(extractionCtx)
-		# objc_fixer.fixObjC(extractionCtx)
+		objc_fixer.fixObjC(extractionCtx)
 
 		writeProcedures = macho_offset.optimizeOffsets(extractionCtx)
 
@@ -177,6 +179,10 @@ def _extractImage(
 					procedure.fileCtx.getBytes(procedure.readOffset, procedure.size)
 				)
 				pass
+			pass
+
+		process = psutil.Process(os.getpid())
+		print(process.memory_info().rss)  # in bytes
 
 		statusBar.update(unit="Extractor", status="Done")
 

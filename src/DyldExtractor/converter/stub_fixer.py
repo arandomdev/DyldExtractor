@@ -1179,10 +1179,6 @@ class _StubFixer(object):
 		if not dyldInfo:
 			return
 
-		textFile = self._machoCtx.fileForAddr(
-			self._machoCtx.segments[b"__TEXT"].seg.vmaddr
-		)
-
 		linkeditFile = self._machoCtx.fileForAddr(
 			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
 		)
@@ -1216,11 +1212,12 @@ class _StubFixer(object):
 					continue
 
 				# repoint the bind pointer to the stub helper
-				bindPtrOff = self._machoCtx.segmentsI[record.segment].seg.fileoff
-				bindPtrOff += record.offset
+				bindPtrAddr = self._machoCtx.segmentsI[record.segment].seg.vmaddr
+				bindPtrOff = self._dyldCtx.convertAddr(bindPtrAddr)[0] + record.offset
+				ctx = self._machoCtx.fileForAddr(bindPtrAddr)
 
 				newBindPtr = struct.pack("<Q", helperAddr)
-				textFile.writeBytes(bindPtrOff, newBindPtr)
+				ctx.writeBytes(bindPtrOff, newBindPtr)
 				helperAddr += REG_HELPER_SIZE
 				continue
 

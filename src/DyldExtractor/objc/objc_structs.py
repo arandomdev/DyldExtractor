@@ -79,19 +79,19 @@ class objc_method_list_t(Structure):
 	RELATIVE_METHOD_FLAG = 0x80000000
 	METHOD_LIST_FLAGS_MASK = 0xFFFF0000
 
-	entsize: int
+	entsizeAndFlags: int
 	count: int
 
 	_fields_ = [
-		("entsize", c_uint32),
+		("entsizeAndFlags", c_uint32),
 		("count", c_uint32),
 	]
 
 	def usesRelativeMethods(self):
-		return self.entsize & self.METHOD_LIST_FLAGS_MASK != 0
+		return self.entsizeAndFlags & self.METHOD_LIST_FLAGS_MASK != 0
 
 	def getEntsize(self):
-		return self.entsize & ~3 & ~self.METHOD_LIST_FLAGS_MASK
+		return self.entsizeAndFlags & ~3 & ~self.METHOD_LIST_FLAGS_MASK
 
 
 class objc_method_small_t(Structure):
