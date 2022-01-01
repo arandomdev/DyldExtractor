@@ -15,14 +15,12 @@ except AttributeError:
 	exit(1)
 
 from DyldExtractor.extraction_context import ExtractionContext
-from DyldExtractor.file_context import FileContext
-
+from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.dyld.dyld_context import DyldContext
+
 from DyldExtractor.dyld.dyld_structs import (
 	dyld_cache_image_info
 )
-
-from DyldExtractor.macho.macho_context import MachOContext
 
 from DyldExtractor.converter import (
 	slide_info,
@@ -82,8 +80,8 @@ def _getArguments():
 def _openSubCaches(
 	mainCachePath: str,
 	numSubCaches: int
-) -> Tuple[List[FileContext], List[BinaryIO]]:
-	"""Create FileContext objects for each sub cache.
+) -> Tuple[List[DyldContext], List[BinaryIO]]:
+	"""Create DyldContext objects for each sub cache.
 
 	Assumes that each sub cache has the same base name as the
 	main cache, and that the suffixes are preserved.
@@ -102,7 +100,7 @@ def _openSubCaches(
 	for cacheSuffix in subCacheSuffixes:
 		subCachePath = f"{mainCachePath}.{cacheSuffix}"
 		cacheFileObject = open(subCachePath, mode="rb")
-		cacheFileCtx = FileContext(cacheFileObject)
+		cacheFileCtx = DyldContext(cacheFileObject)
 
 		subCaches.append(cacheFileCtx)
 		subCachesFiles.append(cacheFileObject)
@@ -144,7 +142,7 @@ def _extractImage(
 
 		# get a a writable copy of the MachOContext
 		machoOffset, context = dyldCtx.convertAddr(image.address)
-		machoCtx = MachOContext(context.fileCtx.makeCopy(copyMode=True), machoOffset)
+		machoCtx = MachOContext(context.fileObject, machoOffset, True)
 
 		# Add sub caches if necessary
 		if dyldCtx.hasSubCaches():
@@ -154,7 +152,7 @@ def _extractImage(
 			)
 			machoCtx.addSubfiles(
 				mainFileMap,
-				((m, ctx.fileCtx.makeCopy(copyMode=True)) for m, ctx in mappings)
+				((m, ctx.makeCopy(copyMode=True)) for m, ctx in mappings)
 			)
 			pass
 
@@ -224,13 +222,12 @@ def main():
 	)
 
 	with open(args.dyld_path, "rb") as f:
-		dyldFileCtx = FileContext(f)
-		dyldCtx = DyldContext(dyldFileCtx)
+		dyldCtx = DyldContext(f)
 
 		# enumerate images, create a map of paths and images
 		imageMap = {}
 		for imageData in dyldCtx.images:
-			path = dyldCtx.fileCtx.readString(imageData.pathFileOffset)
+			path = dyldCtx.readString(imageData.pathFileOffset)
 			path = path[0:-1]  # remove null terminator
 			path = path.decode("utf-8")
 

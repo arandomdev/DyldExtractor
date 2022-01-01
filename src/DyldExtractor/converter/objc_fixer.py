@@ -10,6 +10,8 @@ from typing import (
 )
 
 from DyldExtractor.extraction_context import ExtractionContext
+from DyldExtractor.macho.macho_context import MachOContext
+
 from DyldExtractor.converter import (
 	slide_info,
 	stub_fixer
@@ -30,7 +32,6 @@ from DyldExtractor.objc.objc_structs import (
 	objc_protocol_t
 )
 
-from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.macho.macho_structs import (
 	LoadCommands,
 	linkedit_data_command,
@@ -118,10 +119,9 @@ class _ObjCSelectorFixer(object):
 
 		# enumerate the text
 		textSectAddr = textSect.addr
-		textSectOff, ctx = self._dyldCtx.convertAddr(textSectAddr)
+		textSectOff, textCtx = self._dyldCtx.convertAddr(textSectAddr)
 
-		textFile = ctx.fileCtx
-		writableTextFile = self._machoCtx.fileForAddr(textSectAddr)
+		writableTextFile = self._machoCtx.ctxForAddr(textSectAddr)
 
 		for i, instrData in enumerate(self._textInstr):
 			if instrData[1] != "adrp":
@@ -135,7 +135,7 @@ class _ObjCSelectorFixer(object):
 
 			adrpAddr = textSectAddr + (i * 4)
 			adrpOff = textSectOff + (i * 4)
-			adrpInstr = textFile.readFormat("<I", adrpOff)[0]
+			adrpInstr = textCtx.readFormat("<I", adrpOff)[0]
 
 			# Find the ADRP result
 			immlo = (adrpInstr & 0x60000000) >> 29
@@ -148,7 +148,7 @@ class _ObjCSelectorFixer(object):
 
 			for addInstrIdx in addInstrIdxs:
 				addOff = textSectOff + (addInstrIdx * 4)
-				addInstr = textFile.readFormat("<I", addOff)[0]
+				addInstr = textCtx.readFormat("<I", addOff)[0]
 
 				# Test for a special ADD cases
 				if addInstr & 0xffc00000 != 0x91000000:
@@ -203,7 +203,7 @@ class _ObjCSelectorFixer(object):
 
 		textSect = self._machoCtx.segments[b"__TEXT"].sects[b"__text"]
 		textSectOff, ctx = self._dyldCtx.convertAddr(textSect.addr)
-		textData = bytearray(ctx.fileCtx.getBytes(textSectOff, textSect.size))
+		textData = bytearray(ctx.getBytes(textSectOff, textSect.size))
 
 		opStrTrans = str.maketrans("", "", "[]!")
 		disassembler = cp.Cs(cp.CS_ARCH_ARM64, cp.CS_MODE_LITTLE_ENDIAN)
@@ -382,7 +382,7 @@ class _ObjCFixer(object):
 		for seg in self._machoCtx.segmentsI:
 			if b"__objc_imageinfo" in seg.sects:
 				imageInfo = seg.sects[b"__objc_imageinfo"]
-				imageInfoFile = self._machoCtx.fileForAddr(seg.seg.vmaddr)
+				imageInfoFile = self._machoCtx.ctxForAddr(seg.seg.vmaddr)
 				break
 			pass
 
@@ -406,10 +406,10 @@ class _ObjCFixer(object):
 
 		# Get the libobjc.A.dylib image
 		for image in self._dyldCtx.images:
-			path = self._dyldCtx.fileCtx.readString(image.pathFileOffset)
+			path = self._dyldCtx.readString(image.pathFileOffset)
 			if b"libobjc.A.dylib" in path:
 				offset, ctx = self._dyldCtx.convertAddr(image.address)
-				self._libobjcImage = MachOContext(ctx.fileCtx, offset)
+				self._libobjcImage = MachOContext(ctx.fileObject, offset)
 				break
 			pass
 		else:
@@ -498,7 +498,7 @@ class _ObjCFixer(object):
 		elif objcScoffs.size == 0x28:
 			# First the version number and then pointers
 			verOff, ctx = self._dyldCtx.convertAddr(objcScoffs.addr)
-			version = ctx.fileCtx.readFormat("<Q", verOff)[0]
+			version = ctx.readFormat("<Q", verOff)[0]
 			if version != 2:
 				self._logger.warning(f"Unknown objc opt version: {version}")
 				pass
@@ -549,7 +549,7 @@ class _ObjCFixer(object):
 			# Test the first method
 			methodAddr = methodListAddr + objc_method_list_t.SIZE
 			nameOff, ctx = self._dyldCtx.convertAddr(methodAddr)
-			name = ctx.fileCtx.readFormat("<i", nameOff)[0]
+			name = ctx.readFormat("<i", nameOff)[0]
 
 			# TODO: Hopefully there is a better way to detect this.
 			if name >= 0 and name < optMethodNamesSize:
@@ -663,7 +663,7 @@ class _ObjCFixer(object):
 					pass
 
 				elif sect.sectname == b"__objc_selrefs":
-					file = self._machoCtx.fileForAddr(sect.addr)
+					file = self._machoCtx.ctxForAddr(sect.addr)
 					for ptrAddr in range(sect.addr, sect.addr + sect.size, 8):
 						self._statusBar.update(status="Processing Selector References")
 						selRefAddr = self._slider.slideAddress(ptrAddr)
@@ -736,7 +736,7 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(categoryAddr):
 			newCategoryAddr = categoryAddr
 
-			file = self._machoCtx.fileForAddr(categoryAddr)
+			file = self._machoCtx.ctxForAddr(categoryAddr)
 			defOff = self._dyldCtx.convertAddr(categoryAddr)[0]
 			file.writeBytes(defOff, categoryDef)
 			pass
@@ -809,7 +809,7 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(classAddr):
 			newClassAddr = classAddr
 
-			file = self._machoCtx.fileForAddr(classAddr)
+			file = self._machoCtx.ctxForAddr(classAddr)
 			defOff = self._dyldCtx.convertAddr(classAddr)[0]
 			file.writeBytes(defOff, classDef)
 			pass
@@ -887,7 +887,7 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(classDataAddr):
 			newClassDataAddr = classDataAddr
 
-			file = self._machoCtx.fileForAddr(classDataAddr)
+			file = self._machoCtx.ctxForAddr(classDataAddr)
 			defOff = self._dyldCtx.convertAddr(classDataAddr)[0]
 			file.writeBytes(defOff, classDataDef)
 			pass
@@ -940,7 +940,7 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(ivarListAddr):
 			newIvarListAddr = ivarListAddr
 
-			file = self._machoCtx.fileForAddr(ivarListAddr)
+			file = self._machoCtx.ctxForAddr(ivarListAddr)
 			defOff = self._dyldCtx.convertAddr(ivarListAddr)[0]
 			file.writeBytes(defOff, ivarListData)
 			pass
@@ -974,7 +974,7 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(protoListAddr):
 			newProtoListAddr = protoListAddr
 
-			file = self._machoCtx.fileForAddr(protoListAddr)
+			file = self._machoCtx.ctxForAddr(protoListAddr)
 			defOff = self._dyldCtx.convertAddr(protoListAddr)[0]
 			file.writeBytes(defOff, protoListData)
 			pass
@@ -1044,7 +1044,7 @@ class _ObjCFixer(object):
 			newPtr = self._processString(oldPtr)
 
 			if self._machoCtx.containsAddr(protoDef.extendedMethodTypes):
-				file = self._machoCtx.fileForAddr(protoDef.extendedMethodTypes)
+				file = self._machoCtx.ctxForAddr(protoDef.extendedMethodTypes)
 				ptrOff = self._dyldCtx.convertAddr(protoDef.extendedMethodTypes)[0]
 				struct.pack_into("<Q", file.file, ptrOff, newPtr)
 				pass
@@ -1073,7 +1073,7 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(protoAddr):
 			newProtoAddr = protoAddr
 
-			file = self._machoCtx.fileForAddr(protoAddr)
+			file = self._machoCtx.ctxForAddr(protoAddr)
 			defOff = self._dyldCtx.convertAddr(protoAddr)[0]
 			file.writeBytes(defOff, protoData)
 			pass
@@ -1124,7 +1124,7 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(propertyListAddr):
 			newPropertyListAddr = propertyListAddr
 
-			file = self._machoCtx.fileForAddr(propertyListAddr)
+			file = self._machoCtx.ctxForAddr(propertyListAddr)
 			defOff = self._dyldCtx.convertAddr(propertyListAddr)[0]
 			file.writeBytes(defOff, propertyListData)
 			pass
@@ -1222,7 +1222,7 @@ class _ObjCFixer(object):
 		if self._machoCtx.containsAddr(methodListAddr):
 			newMethodListAddr = methodListAddr
 
-			file = self._machoCtx.fileForAddr(methodListAddr)
+			file = self._machoCtx.ctxForAddr(methodListAddr)
 			defOff = self._dyldCtx.convertAddr(methodListAddr)[0]
 			file.writeBytes(defOff, methodListData)
 			pass
@@ -1256,7 +1256,7 @@ class _ObjCFixer(object):
 			if not stringOff:
 				return None
 
-			stringData = ctx.fileCtx.readString(stringOff)
+			stringData = ctx.readString(stringOff)
 			self._addExtraData(stringData)
 			pass
 
@@ -1274,7 +1274,7 @@ class _ObjCFixer(object):
 			newIntAddr = self._extraDataHead
 
 			intOff, ctx = self._dyldCtx.convertAddr(intAddr)
-			intData = ctx.fileCtx.getBytes(intOff, intSize)
+			intData = ctx.getBytes(intOff, intSize)
 
 			self._addExtraData(intData)
 			pass
@@ -1319,7 +1319,7 @@ class _ObjCFixer(object):
 				struct.pack_into("<Q", self._extraData, ptrOffset, newAddr)
 				pass
 			else:
-				file = self._machoCtx.fileForAddr(destPtr)
+				file = self._machoCtx.ctxForAddr(destPtr)
 				ptrOffset = self._dyldCtx.convertAddr(destPtr)[0]
 				struct.pack_into("Q", file.file, ptrOffset, newAddr)
 				pass
@@ -1390,14 +1390,14 @@ class _ObjCFixer(object):
 				continue
 
 			loadCommandsData.extend(
-				self._machoCtx.fileCtx.getBytes(readHead, cmd.cmdsize)
+				self._machoCtx.getBytes(readHead, cmd.cmdsize)
 			)
 			readHead += cmd.cmdsize
 			pass
 
 		self._machoCtx.header.ncmds -= len(commandsToRemove)
 		self._machoCtx.header.sizeofcmds = len(loadCommandsData)
-		self._machoCtx.fileCtx.writeBytes(
+		self._machoCtx.writeBytes(
 			self._machoCtx.fileOffset + mach_header_64.SIZE,
 			loadCommandsData
 		)
@@ -1419,13 +1419,13 @@ class _ObjCFixer(object):
 			+ self._machoCtx.header.sizeofcmds
 			- moveStart
 		)
-		self._machoCtx.fileCtx.file.move(
+		self._machoCtx.file.move(
 			moveStart + segment_command_64.SIZE,
 			moveStart,
 			bytesToMove
 		)
 
-		self._machoCtx.fileCtx.writeBytes(moveStart, self._extraSegment)
+		self._machoCtx.writeBytes(moveStart, self._extraSegment)
 
 		# update the extraction context
 		self._extractionCtx.extraSegmentData = self._extraData

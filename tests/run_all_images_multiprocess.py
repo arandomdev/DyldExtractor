@@ -12,7 +12,6 @@ from typing import (
 	BinaryIO
 )
 
-from DyldExtractor.file_context import FileContext
 from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.dyld.dyld_context import DyldContext
 from DyldExtractor.extraction_context import ExtractionContext
@@ -41,8 +40,8 @@ class _DummyProgressBar(object):
 def _openSubCaches(
 	mainCachePath: str,
 	numSubCaches: int
-) -> Tuple[List[FileContext], List[BinaryIO]]:
-	"""Create FileContext objects for each sub cache.
+) -> Tuple[List[DyldContext], List[BinaryIO]]:
+	"""Create DyldContext objects for each sub cache.
 
 	Assumes that each sub cache has the same base name as the
 	main cache, and that the suffixes are preserved.
@@ -61,7 +60,7 @@ def _openSubCaches(
 	for cacheSuffix in subCacheSuffixes:
 		subCachePath = f"{mainCachePath}.{cacheSuffix}"
 		cacheFileObject = open(subCachePath, mode="rb")
-		cacheFileCtx = FileContext(cacheFileObject)
+		cacheFileCtx = DyldContext(cacheFileObject)
 
 		subCaches.append(cacheFileCtx)
 		subCachesFiles.append(cacheFileObject)
@@ -89,8 +88,7 @@ def _imageRunner(dyldPath: str, imageIndex: int) -> None:
 
 	# process the image
 	with open(dyldPath, "rb") as f:
-		dyldFileCtx = FileContext(f)
-		dyldCtx = DyldContext(dyldFileCtx)
+		dyldCtx = DyldContext(f)
 
 		subCacheFiles: List[BinaryIO] = []
 		try:
@@ -106,10 +104,7 @@ def _imageRunner(dyldPath: str, imageIndex: int) -> None:
 			machoOffset, context = dyldCtx.convertAddr(
 				dyldCtx.images[imageIndex].address
 			)
-			machoCtx = MachOContext(
-				context.fileCtx.makeCopy(copyMode=True),
-				machoOffset
-			)
+			machoCtx = MachOContext(context.fileObject, machoOffset, True)
 
 			# Add sub caches if necessary
 			if dyldCtx.hasSubCaches():
@@ -119,7 +114,7 @@ def _imageRunner(dyldPath: str, imageIndex: int) -> None:
 				)
 				machoCtx.addSubfiles(
 					mainFileMap,
-					((m, ctx.fileCtx.makeCopy(copyMode=True)) for m, ctx in mappings)
+					((m, ctx.makeCopy(copyMode=True)) for m, ctx in mappings)
 				)
 				pass
 
@@ -176,11 +171,10 @@ if "__main__" == __name__:
 	# create a list of images
 	images: List[str] = []
 	with open(args.dyld_path, "rb") as f:
-		dyldFileCtx = FileContext(f)
-		dyldCtx = DyldContext(dyldFileCtx)
+		dyldCtx = DyldContext(f)
 
 		for index, image in enumerate(dyldCtx.images):
-			imagePath = dyldCtx.fileCtx.readString(image.pathFileOffset)[0:-1]
+			imagePath = dyldCtx.readString(image.pathFileOffset)[0:-1]
 			imagePath = imagePath.decode("utf-8")
 			imageName = imagePath.split("/")[-1]
 

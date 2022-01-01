@@ -4,13 +4,12 @@ import struct
 from typing import Iterator, List, Tuple, Dict
 
 from DyldExtractor.extraction_context import ExtractionContext
+from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.file_context import FileContext
 from DyldExtractor.converter import slide_info
+from DyldExtractor.dyld import dyld_trie
 from DyldExtractor import leb128
 
-from DyldExtractor.dyld import dyld_trie
-
-from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.macho.macho_constants import *
 from DyldExtractor.macho.macho_structs import (
 	LoadCommands,
@@ -53,7 +52,7 @@ class _Symbolizer(object):
 		# create a map of image paths and their addresses
 		self._images: Dict[bytes, int] = {}
 		for image in self._dyldCtx.images:
-			imagePath = self._dyldCtx.fileCtx.readString(image.pathFileOffset)
+			imagePath = self._dyldCtx.readString(image.pathFileOffset)
 			self._images[imagePath] = image.address
 			pass
 
@@ -170,7 +169,7 @@ class _Symbolizer(object):
 		"""
 
 		dylibPathOff = dylib._fileOff_ + dylib.dylib.name.offset
-		dylibPath = context.fileCtx.readString(dylibPathOff)
+		dylibPath = context.readString(dylibPathOff)
 		if dylibPath not in self._images:
 			self._logger.warning(f"Unable to find dependency: {dylibPath}")
 			return None
@@ -179,7 +178,7 @@ class _Symbolizer(object):
 		imageOff, dyldCtx = self._dyldCtx.convertAddr(imageAddr)
 
 		# Since we're not editing the dependencies, this should be fine.
-		context = MachOContext(dyldCtx.fileCtx, imageOff)
+		context = MachOContext(dyldCtx.fileObject, imageOff)
 		return _DependencyInfo(dylibPath, imageAddr, context)
 
 	def _readDepExports(
@@ -209,7 +208,7 @@ class _Symbolizer(object):
 
 		linkeditFile = self._dyldCtx.convertAddr(
 			depInfo.context.segments[b"__LINKEDIT"].seg.vmaddr
-		)[1].fileCtx.file
+		)[1].file
 
 		try:
 			depExports = dyld_trie.ReadExports(
@@ -260,7 +259,7 @@ class _Symbolizer(object):
 			self._logger.warning("Unable to find LC_SYMTAB.")
 			return
 
-		linkeditFile = self._machoCtx.fileForAddr(
+		linkeditFile = self._machoCtx.ctxForAddr(
 			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
 		)
 
@@ -462,7 +461,7 @@ class Arm64Utilities(object):
 		if helperOff is None:
 			return None
 
-		ldr, b, data = ctx.fileCtx.readFormat("<III", helperOff)
+		ldr, b, data = ctx.readFormat("<III", helperOff)
 
 		# verify
 		if (
@@ -530,7 +529,7 @@ class Arm64Utilities(object):
 			return None
 
 		# test stp and mov
-		stp, mov = ctx.fileCtx.readFormat("<II", stubOff)
+		stp, mov = ctx.readFormat("<II", stubOff)
 		if (
 			(stp & 0x7FC00000) != 0x29800000
 			or (mov & 0x7F3FFC00) != 0x11000000
@@ -538,7 +537,7 @@ class Arm64Utilities(object):
 			return None
 
 		# Find the branch instruction
-		dataSource = ctx.fileCtx.file
+		dataSource = ctx.file
 		branchInstrOff = None
 		for instrOff in range(stubOff, stubOff + SEARCH_LIMIT, 4):
 			# (instr & 0xFE9FF000) == 0xD61F0000
@@ -567,8 +566,8 @@ class Arm64Utilities(object):
 			return None
 
 		# Test if there is a stp before the bl and a ldp before the braaz
-		adrp = ctx.fileCtx.readFormat("<I", blInstrOff + 4)[0]
-		ldp = ctx.fileCtx.readFormat("<I", branchInstrOff - 4)[0]
+		adrp = ctx.readFormat("<I", blInstrOff + 4)[0]
+		ldp = ctx.readFormat("<I", branchInstrOff - 4)[0]
 		if (
 			(adrp & 0x9F00001F) != 0x90000010
 			or (ldp & 0x7FC00000) != 0x28C00000
@@ -576,7 +575,7 @@ class Arm64Utilities(object):
 			return None
 
 		# Hopefully it's a resolver...
-		imm = (ctx.fileCtx.readFormat("<I", blInstrOff)[0] & 0x3FFFFFF) << 2
+		imm = (ctx.readFormat("<I", blInstrOff)[0] & 0x3FFFFFF) << 2
 		imm = self.signExtend(imm, 28)
 		blResult = address + (blInstrOff - stubOff) + imm
 
@@ -623,7 +622,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, ldr, br = ctx.fileCtx.readFormat("<III", stubOff)
+		adrp, ldr, br = ctx.readFormat("<III", stubOff)
 
 		# verify
 		if (
@@ -660,7 +659,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, add, ldr, braa = ctx.fileCtx.readFormat(
+		adrp, add, ldr, braa = ctx.readFormat(
 			"<IIII",
 			stubOff
 		)
@@ -700,7 +699,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, ldr, br = ctx.fileCtx.readFormat("<III", stubOff)
+		adrp, ldr, br = ctx.readFormat("<III", stubOff)
 
 		# verify
 		if (
@@ -733,7 +732,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, add, br = ctx.fileCtx.readFormat("<III", stubOff)
+		adrp, add, br = ctx.readFormat("<III", stubOff)
 
 		# verify
 		if (
@@ -766,7 +765,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, add, ldr, braa = ctx.fileCtx.readFormat("<IIII", stubOff)
+		adrp, add, ldr, braa = ctx.readFormat("<IIII", stubOff)
 
 		# verify
 		if (
@@ -806,7 +805,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, add, br, trap = ctx.fileCtx.readFormat("<IIII", stubOff)
+		adrp, add, br, trap = ctx.readFormat("<IIII", stubOff)
 
 		# verify
 		if (
@@ -839,7 +838,7 @@ class Arm64Utilities(object):
 		if stubOff is None:
 			return None
 
-		adrp, ldr, braaz = ctx.fileCtx.readFormat("<III", stubOff)
+		adrp, ldr, braaz = ctx.readFormat("<III", stubOff)
 
 		# verify
 		if (
@@ -1042,7 +1041,7 @@ class _StubFixer(object):
 			(LoadCommands.LC_DYLD_INFO, LoadCommands.LC_DYLD_INFO_ONLY)
 		)
 
-		linkeditFile = self._machoCtx.fileForAddr(
+		linkeditFile = self._machoCtx.ctxForAddr(
 			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
 		)
 
@@ -1179,7 +1178,7 @@ class _StubFixer(object):
 		if not dyldInfo:
 			return
 
-		linkeditFile = self._machoCtx.fileForAddr(
+		linkeditFile = self._machoCtx.ctxForAddr(
 			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
 		)
 
@@ -1214,7 +1213,7 @@ class _StubFixer(object):
 				# repoint the bind pointer to the stub helper
 				bindPtrAddr = self._machoCtx.segmentsI[record.segment].seg.vmaddr
 				bindPtrOff = self._dyldCtx.convertAddr(bindPtrAddr)[0] + record.offset
-				ctx = self._machoCtx.fileForAddr(bindPtrAddr)
+				ctx = self._machoCtx.ctxForAddr(bindPtrAddr)
 
 				newBindPtr = struct.pack("<Q", helperAddr)
 				ctx.writeBytes(bindPtrOff, newBindPtr)
@@ -1251,11 +1250,11 @@ class _StubFixer(object):
 				stubMap[stubName] = [stubAddr]
 			pass
 
-		linkeditFile = self._machoCtx.fileForAddr(
+		linkeditFile = self._machoCtx.ctxForAddr(
 			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
 		)
 
-		textFile = self._machoCtx.fileForAddr(
+		textFile = self._machoCtx.ctxForAddr(
 			self._machoCtx.segments[b"__TEXT"].seg.vmaddr
 		)
 
@@ -1355,7 +1354,7 @@ class _StubFixer(object):
 								symPtrOff = self._dyldCtx.convertAddr(symPtrAddr)[0]
 
 								if not symbolPtrFile:
-									symbolPtrFile = self._machoCtx.fileForAddr(symPtrAddr)
+									symbolPtrFile = self._machoCtx.ctxForAddr(symPtrAddr)
 									pass
 
 								symbolPtrFile.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))
@@ -1365,7 +1364,7 @@ class _StubFixer(object):
 								# need to relink both the stub and the symbol pointer
 								symPtrOff = self._dyldCtx.convertAddr(symPtrAddr)[0]
 								if not symbolPtrFile:
-									symbolPtrFile = self._machoCtx.fileForAddr(symPtrAddr)
+									symbolPtrFile = self._machoCtx.ctxForAddr(symPtrAddr)
 									pass
 								symbolPtrFile.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))
 
@@ -1410,7 +1409,7 @@ class _StubFixer(object):
 		# Section offsets by section_64.offset are sometimes
 		# inaccurate, like in libcrypto.dylib
 		textOff = self._dyldCtx.convertAddr(textAddr)[0]
-		textFile = self._machoCtx.fileForAddr(textAddr)
+		textFile = self._machoCtx.ctxForAddr(textAddr)
 
 		for sectOff in range(0, textSect.size, 4):
 			# We are only looking for bl and b instructions only.
@@ -1497,7 +1496,7 @@ class _StubFixer(object):
 
 		self._statusBar.update(status="Fixing Indirect Symbols")
 
-		linkeditFile = self._machoCtx.fileForAddr(
+		linkeditFile = self._machoCtx.ctxForAddr(
 			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
 		)
 

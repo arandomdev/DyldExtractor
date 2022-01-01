@@ -23,10 +23,10 @@ from DyldExtractor.converter import (
 	slide_info,
 	stub_fixer
 )
+
 from DyldExtractor.dyld.dyld_context import DyldContext
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.macho.macho_context import MachOContext
-from DyldExtractor.file_context import FileContext
 
 # check dependencies
 try:
@@ -91,8 +91,8 @@ def _workerInitializer():
 def _openSubCaches(
 	mainCachePath: str,
 	numSubCaches: int
-) -> Tuple[List[FileContext], List[BinaryIO]]:
-	"""Create FileContext objects for each sub cache.
+) -> Tuple[List[DyldContext], List[BinaryIO]]:
+	"""Create DyldContext objects for each sub cache.
 
 	Assumes that each sub cache has the same base name as the
 	main cache, and that the suffixes are preserved.
@@ -111,7 +111,7 @@ def _openSubCaches(
 	for cacheSuffix in subCacheSuffixes:
 		subCachePath = f"{mainCachePath}.{cacheSuffix}"
 		cacheFileObject = open(subCachePath, mode="rb")
-		cacheFileCtx = FileContext(cacheFileObject)
+		cacheFileCtx = DyldContext(cacheFileObject)
 
 		subCaches.append(cacheFileCtx)
 		subCachesFiles.append(cacheFileObject)
@@ -153,8 +153,7 @@ def _extractImage(
 	with open(dyldPath, "rb") as f:
 		subCacheFiles: List[BinaryIO] = []
 		try:
-			dyldFileCtx = FileContext(f)
-			dyldCtx = DyldContext(dyldFileCtx)
+			dyldCtx = DyldContext(f)
 
 			# add sub caches if there are any
 			if dyldCtx.hasSubCaches():
@@ -168,10 +167,7 @@ def _extractImage(
 			machoOffset, context = dyldCtx.convertAddr(
 				dyldCtx.images[imageIndex].address
 			)
-			machoCtx = MachOContext(
-				context.fileCtx.makeCopy(copyMode=True),
-				machoOffset
-			)
+			machoCtx = MachOContext(context.fileObject, machoOffset, True)
 
 			# Add sub caches if necessary
 			if dyldCtx.hasSubCaches():
@@ -181,7 +177,7 @@ def _extractImage(
 				)
 				machoCtx.addSubfiles(
 					mainFileMap,
-					((m, ctx.fileCtx.makeCopy(copyMode=True)) for m, ctx in mappings)
+					((m, ctx.makeCopy(copyMode=True)) for m, ctx in mappings)
 				)
 				pass
 
@@ -256,11 +252,10 @@ def _main() -> None:
 	# create a list of image paths
 	imagePaths: List[str] = []
 	with open(args.dyld_path, "rb") as f:
-		dyldFileCtx = FileContext(f)
-		dyldCtx = DyldContext(dyldFileCtx)
+		dyldCtx = DyldContext(f)
 
 		for image in dyldCtx.images:
-			imagePath = dyldCtx.fileCtx.readString(
+			imagePath = dyldCtx.readString(
 				image.pathFileOffset
 			)[0:-1].decode("utf-8")
 			imagePaths.append(imagePath)

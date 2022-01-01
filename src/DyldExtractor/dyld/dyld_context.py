@@ -1,4 +1,8 @@
-from typing import List, Tuple
+from typing import (
+	List,
+	Tuple,
+	BinaryIO
+)
 
 from DyldExtractor.file_context import FileContext
 from DyldExtractor.dyld.dyld_structs import (
@@ -8,9 +12,9 @@ from DyldExtractor.dyld.dyld_structs import (
 )
 
 
-class DyldContext(object):
+class DyldContext(FileContext):
 
-	def __init__(self, file: FileContext) -> None:
+	def __init__(self, fileObject: BinaryIO, copyMode: bool = False) -> None:
 		"""A wrapper around a dyld file.
 
 		Provides convenient methods and attributes for a given dyld file.
@@ -20,15 +24,14 @@ class DyldContext(object):
 				sub caches.
 		"""
 
-		super().__init__()
+		super().__init__(fileObject, copyMode=copyMode)
 
-		self.fileCtx = file
-		self.header = dyld_cache_header(file.file)
+		self.header = dyld_cache_header(self.file)
 
 		self.mappings: List[Tuple[dyld_cache_mapping_info, DyldContext]] = []
 		for i in range(self.header.mappingCount):
 			offset = self.header.mappingOffset + (i * dyld_cache_mapping_info.SIZE)
-			self.mappings.append((dyld_cache_mapping_info(file.file, offset), self))
+			self.mappings.append((dyld_cache_mapping_info(self.file, offset), self))
 			pass
 
 		# get images
@@ -44,7 +47,7 @@ class DyldContext(object):
 
 		for i in range(imagesCount):
 			offset = imagesOffset + (i * dyld_cache_image_info.SIZE)
-			self.images.append(dyld_cache_image_info(file.file, offset))
+			self.images.append(dyld_cache_image_info(self.file, offset))
 			pass
 
 		self._subCaches: List[DyldContext] = []
@@ -101,12 +104,10 @@ class DyldContext(object):
 		else:
 			return False
 
-	def addSubCaches(self, subCacheFileCtxs: List[FileContext]) -> None:
-		cacheClass = type(self)
-		for fileCtx in subCacheFileCtxs:
-			subCache = cacheClass(fileCtx)
-			self._subCaches.append(subCache)
-			self.mappings.extend(subCache.mappings)
+	def addSubCaches(self, subCacheCtxs: List["DyldContext"]) -> None:
+		for ctx in subCacheCtxs:
+			self._subCaches.append(ctx)
+			self.mappings.extend(ctx.mappings)
 			pass
 		pass
 

@@ -9,10 +9,10 @@ from typing import (
 )
 
 from DyldExtractor.extraction_context import ExtractionContext
-from DyldExtractor.file_context import FileContext
+from DyldExtractor.macho.macho_context import MachOContext
+from DyldExtractor.dyld.dyld_context import DyldContext
 from DyldExtractor.structure import Structure
 
-from DyldExtractor.dyld.dyld_context import DyldContext
 from DyldExtractor.dyld.dyld_constants import *
 from DyldExtractor.dyld.dyld_structs import (
 	dyld_cache_mapping_and_slide_info,
@@ -67,7 +67,7 @@ class _V2Rebaser(object):
 
 		# get pageStarts, an array of uint_16
 		pageStartsOff = self.slideInfo._fileOff_ + self.slideInfo.page_starts_offset
-		pageStarts = self.dyldCtx.fileCtx.getBytes(
+		pageStarts = self.dyldCtx.getBytes(
 			pageStartsOff,
 			self.slideInfo.page_starts_count * 2
 		)
@@ -90,7 +90,7 @@ class _V2Rebaser(object):
 		):
 			return
 
-		machoFile = self.machoCtx.fileForAddr(segment.vmaddr)
+		ctx = self.machoCtx.ctxForAddr(segment.vmaddr)
 
 		# get the indices of relevent pageStarts
 		dataStart = self.mapping.address
@@ -117,14 +117,14 @@ class _V2Rebaser(object):
 				pageOff = (i * pageSize) + self.mapping.fileOffset
 
 				# The page offset are 32bit jumps
-				self._rebasePage(machoFile, pageOff, page * 4)
+				self._rebasePage(ctx, pageOff, page * 4)
 
 				self.statusBar.update(status="Rebasing Pages")
 		pass
 
 	def _rebasePage(
 		self,
-		machoFile: FileContext,
+		ctx: MachOContext,
 		pageStart: int,
 		pageOffset: int
 	) -> None:
@@ -148,14 +148,14 @@ class _V2Rebaser(object):
 		while delta != 0:
 			loc = pageStart + pageOffset
 
-			rawValue = self.dyldCtx.fileCtx.readFormat("<Q", loc)[0]
+			rawValue = self.dyldCtx.readFormat("<Q", loc)[0]
 			delta = (rawValue & deltaMask) >> deltaShift
 
 			newValue = rawValue & valueMask
 			if valueMask != 0:
 				newValue += valueAdd
 
-			machoFile.writeBytes(loc, struct.pack("<Q", newValue))
+			ctx.writeBytes(loc, struct.pack("<Q", newValue))
 			pageOffset += delta
 		pass
 	pass
@@ -181,7 +181,7 @@ class _V3Rebaser(object):
 		self.statusBar.update(unit="Slide Info Rebaser")
 
 		pageStartsOff = self.slideInfo._fileOff_ + len(self.slideInfo)
-		pageStarts = self.dyldCtx.fileCtx.getBytes(
+		pageStarts = self.dyldCtx.getBytes(
 			pageStartsOff,
 			self.slideInfo.page_starts_count * 2
 		)
@@ -189,6 +189,8 @@ class _V3Rebaser(object):
 
 		for segment in self.machoCtx.segmentsI:
 			self._rebaseSegment(pageStarts, segment.seg)
+			pass
+		pass
 
 	def _rebaseSegment(
 		self,
@@ -202,7 +204,7 @@ class _V3Rebaser(object):
 		):
 			return
 
-		machoFile = self.machoCtx.fileForAddr(segment.vmaddr)
+		ctx = self.machoCtx.ctxForAddr(segment.vmaddr)
 
 		# get the indices of relevent pageStarts
 		dataStart = self.mapping.address
@@ -222,14 +224,14 @@ class _V3Rebaser(object):
 				continue
 			else:
 				pageOff = (i * pageSize) + self.mapping.fileOffset
-				self._rebasePage(machoFile, pageOff, page)
+				self._rebasePage(ctx, pageOff, page)
 
 				self.statusBar.update(status="Rebasing Pages")
 		pass
 
 	def _rebasePage(
 		self,
-		machoFile: FileContext,
+		ctx: MachOContext,
 		pageOffset: int,
 		delta: int
 	) -> None:
@@ -237,7 +239,7 @@ class _V3Rebaser(object):
 
 		while True:
 			locOff += delta
-			locInfo = dyld_cache_slide_pointer3(self.dyldCtx.fileCtx.file, locOff)
+			locInfo = dyld_cache_slide_pointer3(self.dyldCtx.file, locOff)
 
 			# It appears the delta encoded in the pointers are 64bit jumps...
 			delta = locInfo.plain.offsetToNextPointer * 8
@@ -251,10 +253,13 @@ class _V3Rebaser(object):
 				bottom43Bits = value51 & 0x000007FFFFFFFFFF
 				newValue = (top8Bits << 13) | bottom43Bits
 
-			machoFile.writeBytes(locOff, struct.pack("<Q", newValue))
+			ctx.writeBytes(locOff, struct.pack("<Q", newValue))
 
 			if delta == 0:
 				break
+			pass
+		pass
+	pass
 
 
 def _getMappingInfo(
@@ -275,7 +280,7 @@ def _getMappingInfo(
 
 		# the version is encoded as the first uint32 field
 		slideInfoOff = dyldCtx.header.slideInfoOffsetUnused
-		slideInfoVer = dyldCtx.fileCtx.readFormat("<I", slideInfoOff)[0]
+		slideInfoVer = dyldCtx.readFormat("<I", slideInfoOff)[0]
 
 		if slideInfoVer not in _SlideInfoMap:
 			logger.error("Unknown slide info version: " + slideInfoVer)
@@ -283,7 +288,7 @@ def _getMappingInfo(
 
 		# Assume that only the second mapping has slide info
 		mapping = dyldCtx.mappings[1][0]
-		slideInfo = _SlideInfoMap[slideInfoVer](dyldCtx.fileCtx.file, slideInfoOff)
+		slideInfo = _SlideInfoMap[slideInfoVer](dyldCtx.file, slideInfoOff)
 		mappingInfo.append(_MappingInfo(mapping, slideInfo, dyldCtx))
 		pass
 
@@ -300,19 +305,16 @@ def _getMappingInfo(
 				+ mapI * dyld_cache_mapping_and_slide_info.SIZE
 			)
 
-			mapping = dyld_cache_mapping_and_slide_info(context.fileCtx.file, mapOff)
+			mapping = dyld_cache_mapping_and_slide_info(context.file, mapOff)
 			if mapping.slideInfoFileOffset:
-				slideInfoVer = context.fileCtx.readFormat(
-					"<I",
-					mapping.slideInfoFileOffset
-				)[0]
+				slideInfoVer = context.readFormat("<I", mapping.slideInfoFileOffset)[0]
 
 				if slideInfoVer not in _SlideInfoMap:
 					logger.error("Unknown slide info version: " + slideInfoVer)
 					continue
 
 				slideInfo = _SlideInfoMap[slideInfoVer](
-					context.fileCtx.file,
+					context.file,
 					mapping.slideInfoFileOffset
 				)
 				mappingInfo.append(_MappingInfo(mapping, slideInfo, context))
@@ -361,11 +363,11 @@ class PointerSlider(object):
 
 				# regular arm64 pointer
 				if slideInfo.version == 2:
-					return context.fileCtx.readFormat("<Q", offset)[0] & 0xfffffffff
+					return context.readFormat("<Q", offset)[0] & 0xfffffffff
 
 				# arm64e pointer
 				elif slideInfo.version == 3:
-					ptrInfo = dyld_cache_slide_pointer3(context.fileCtx.file, offset)
+					ptrInfo = dyld_cache_slide_pointer3(context.file, offset)
 					if ptrInfo.auth.authenticated:
 						newValue = ptrInfo.auth.offsetFromSharedCacheBase
 						return newValue + slideInfo.auth_value_add
@@ -400,7 +402,7 @@ class PointerSlider(object):
 		"""
 
 		structOff, context = self._dyldCtx.convertAddr(address)
-		structData = structDef(context.fileCtx.file, structOff)
+		structData = structDef(context.file, structOff)
 
 		if ptrNames := getattr(structData, "_pointers_", None):
 			for ptrName in ptrNames:

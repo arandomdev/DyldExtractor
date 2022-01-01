@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from typing import List
 
 from DyldExtractor.extraction_context import ExtractionContext
+from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.file_context import FileContext
 
-from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.macho.macho_structs import (
 	linkedit_data_command,
 	dyld_info_command,
@@ -116,7 +116,7 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> List[WriteProcedure]:
 				segment.seg.fileoff + shiftDelta,
 				dyldCtx.convertAddr(segment.seg.vmaddr)[0],
 				segment.seg.filesize,
-				machoCtx.fileForAddr(segment.seg.vmaddr)
+				machoCtx.ctxForAddr(segment.seg.vmaddr)
 			)
 			pass
 		writeProcedures.append(procedure)

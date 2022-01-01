@@ -1,5 +1,6 @@
 from typing import Tuple
 
+
 def decodeUleb128(buffer: bytes, readHead: int) -> Tuple[int, int]:
 	"""Read a Uleb128 value.
 

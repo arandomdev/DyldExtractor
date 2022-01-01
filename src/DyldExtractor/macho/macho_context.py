@@ -1,12 +1,16 @@
 import struct
-
-from typing import Union, List, Dict, Tuple
+from typing import (
+	Union,
+	List,
+	Dict,
+	Tuple,
+	BinaryIO,
+	Protocol
+)
 
 from DyldExtractor.file_context import FileContext
-
-from DyldExtractor.dyld.dyld_structs import dyld_cache_mapping_info
-
 from DyldExtractor.macho.segment_context import SegmentContext
+
 from DyldExtractor.macho.macho_structs import (
 	LoadCommandMap,
 	LoadCommands,
@@ -17,7 +21,12 @@ from DyldExtractor.macho.macho_structs import (
 )
 
 
-class MachOContext(object):
+class MappingInfo(Protocol):
+	address: int
+	size: int
+
+
+class MachOContext(FileContext):
 
 	loadCommands: List[load_command]
 
@@ -26,8 +35,9 @@ class MachOContext(object):
 
 	def __init__(
 		self,
-		fileCtx: FileContext,
-		offset: int
+		fileObject: BinaryIO,
+		offset: int = 0,
+		copyMode: bool = False
 	) -> None:
 		"""A wrapper around a MachO file.
 
@@ -38,13 +48,11 @@ class MachOContext(object):
 			offset: The offset to the header in the file.
 		"""
 
-		super().__init__()
-
-		self.fileCtx = fileCtx
+		super().__init__(fileObject, copyMode=copyMode)
 		self.fileOffset = offset
 
-		self.header = mach_header_64(self.fileCtx.file, self.fileOffset)
-		self._mappings: List[Tuple[dyld_cache_mapping_info, FileContext]] = []
+		self.header = mach_header_64(self.file, self.fileOffset)
+		self._mappings: List[Tuple[MappingInfo, "MachOContext"]] = []
 
 		# check to make sure the MachO file is 64 bit
 		magic = self.header.magic
@@ -110,31 +118,30 @@ class MachOContext(object):
 
 		Parse the load commands and set the loadCommands attribute.
 		"""
-		self.header = mach_header_64(self.fileCtx.file, self.fileOffset)
+		self.header = mach_header_64(self.file, self.fileOffset)
 
 		self.loadCommands = []
 
 		self.segments = {}
 		self.segmentsI = []
 
-		file = self.fileCtx.file
 		cmdOff = len(self.header) + self.fileOffset
 		for _ in range(self.header.ncmds):
-			file.seek(cmdOff)
-			cmd = struct.unpack("<I", file.read(4))[0]
+			self.file.seek(cmdOff)
+			cmd = struct.unpack("<I", self.file.read(4))[0]
 
 			command = LoadCommandMap.get(cmd, UnknownLoadCommand)
 			if command == UnknownLoadCommand:
 				raise Exception(f"Unknown LoadCommand: {cmd}")
 
-			command = command(file, cmdOff)
+			command = command(self.file, cmdOff)
 
 			cmdOff += command.cmdsize
 			self.loadCommands.append(command)
 
 			# populate the segments at this point too
 			if isinstance(command, segment_command_64):
-				segCtx = SegmentContext(file, command)
+				segCtx = SegmentContext(self.file, command)
 
 				self.segments[command.segname] = segCtx
 				self.segmentsI.append(segCtx)
@@ -154,8 +161,8 @@ class MachOContext(object):
 
 	def addSubfiles(
 		self,
-		mainFileMap: dyld_cache_mapping_info,
-		subFilesAndMaps: List[Tuple[dyld_cache_mapping_info, FileContext]]
+		mainFileMap: MappingInfo,
+		subFilesAndMaps: List[Tuple[MappingInfo, "MachOContext"]]
 	) -> None:
 		"""Add sub files.
 
@@ -167,11 +174,11 @@ class MachOContext(object):
 			subFilesAndMaps: A list of tuples that contain the sub file context
 				and the mapping info.
 		"""
-		self._mappings.append((mainFileMap, self.fileCtx))
+		self._mappings.append((mainFileMap, self))
 		self._mappings.extend(subFilesAndMaps)
 		pass
 
-	def fileForAddr(self, vmaddr: int) -> FileContext:
+	def ctxForAddr(self, vmaddr: int) -> "MachOContext":
 		"""Get the file context that contains the address.
 
 		If there are no sub files added, this just returns the main
@@ -179,7 +186,7 @@ class MachOContext(object):
 		"""
 
 		if not self._mappings:
-			return self.fileCtx
+			return self
 
 		for mapping, ctx in self._mappings:
 			lowBound = mapping.address

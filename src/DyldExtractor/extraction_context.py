@@ -44,4 +44,5 @@ class ExtractionContext(object):
 		self.machoCtx = machoCtx
 		self.statusBar = statusBar
 		self.logger = logger
+		pass
 	pass

@@ -1,6 +1,11 @@
 import struct
 import mmap
-from typing import Any, BinaryIO
+
+from typing import (
+	Any,
+	Tuple,
+	BinaryIO
+)
 
 
 class FileContext:
@@ -34,7 +39,7 @@ class FileContext:
 
 		return self.file[offset:nullIndex + 1]
 
-	def readFormat(self, format: str, offset: int) -> Any:
+	def readFormat(self, format: str, offset: int) -> Tuple[Any, ...]:
 		"""Read a formatted value at the offset.
 
 		Args:
@@ -45,8 +50,7 @@ class FileContext:
 			The formated value.
 		"""
 
-		size = struct.calcsize(format)
-		return struct.unpack(format, self.file[offset:offset + size])
+		return struct.unpack_from(format, self.file, offset)
 
 	def getBytes(self, offset: int, length: int) -> bytes:
 		"""Retrieve data from the datasource.
@@ -75,3 +79,5 @@ class FileContext:
 
 	def makeCopy(self, copyMode: bool = False) -> "FileContext":
 		return type(self)(self.fileObject, copyMode=copyMode)
+
+	pass

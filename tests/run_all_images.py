@@ -6,10 +6,9 @@ import pathlib
 from io import BufferedReader
 
 from DyldExtractor.extraction_context import ExtractionContext
-
 from DyldExtractor.dyld.dyld_context import DyldContext
-
 from DyldExtractor.macho.macho_context import MachOContext
+
 from DyldExtractor.macho.macho_constants import *
 
 from DyldExtractor.converter import (
@@ -52,7 +51,7 @@ def runForAllImages(
 
 		# TODO: Imp sub caches
 		imageOffset = dyldCtx.convertAddr(imageData.address)
-		imagePath = dyldCtx.fileCtx.readString(imageData.pathFileOffset)[0:-1]
+		imagePath = dyldCtx.readString(imageData.pathFileOffset)[0:-1]
 		imagePath = imagePath.decode("utf-8")
 		imageName = imagePath.split("/")[-1]
 
@@ -121,8 +120,7 @@ def main():
 	args = getArguments()
 
 	with open(args.dyld_path, "rb") as f:
-		dyldFile = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-		dyldCtx = DyldContext(dyldFile)
+		dyldCtx = DyldContext(f)
 
 		runForAllImages(f, dyldCtx, statusBar, logger, stopIndex=20)
 		# runForAllImages(f, dyldCtx, statusBar, logger, startIndex=1020)
