@@ -101,7 +101,7 @@ class DyldContext(object):
 		else:
 			return False
 
-	def addSubCaches(self, subCacheFileCtxs: list[FileContext]) -> None:
+	def addSubCaches(self, subCacheFileCtxs: List[FileContext]) -> None:
 		cacheClass = type(self)
 		for fileCtx in subCacheFileCtxs:
 			subCache = cacheClass(fileCtx)

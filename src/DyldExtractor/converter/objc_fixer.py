@@ -99,7 +99,7 @@ class _ObjCSelectorFixer(object):
 		# All the instructions in the text section.
 		# The instruction at index 0 corresponds to
 		# the first instruction.
-		self._textInstr: tuple[int, str, tuple[str]] = None
+		self._textInstr: Tuple[int, str, Tuple[str]] = None
 		pass
 
 	def run(self) -> None:
@@ -1156,7 +1156,7 @@ class _ObjCFixer(object):
 
 		# fix relative pointers after we reserve a new address for the method list
 		# contains a list of tuples of field offsets and their target addresses
-		relativeFixups: list[tuple[int, int]] = []
+		relativeFixups: List[Tuple[int, int]] = []
 		for i in range(methodListDef.count):
 			methodAddr = (
 				methodListAddr

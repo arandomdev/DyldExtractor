@@ -48,10 +48,10 @@ class _Symbolizer(object):
 		self._logger = extractionCtx.logger
 
 		# Stores and address and the possible symbols at the address
-		self._symbolCache: dict[int, list[bytes]] = {}
+		self._symbolCache: Dict[int, List[bytes]] = {}
 
 		# create a map of image paths and their addresses
-		self._images: dict[bytes, int] = {}
+		self._images: Dict[bytes, int] = {}
 		for image in self._dyldCtx.images:
 			imagePath = self._dyldCtx.fileCtx.readString(image.pathFileOffset)
 			self._images[imagePath] = image.address
@@ -94,7 +94,7 @@ class _Symbolizer(object):
 
 		# These exports sometimes change the name of an existing
 		# export symbol. We have to process them last.
-		reExports: list[dyld_trie.ExportInfo] = []
+		reExports: List[dyld_trie.ExportInfo] = []
 
 		# get an initial list of dependencies
 		if dylibs := self._machoCtx.getLoadCommand(DEP_LCS, multiple=True):

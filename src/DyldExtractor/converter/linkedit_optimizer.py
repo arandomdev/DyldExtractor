@@ -1,5 +1,5 @@
 import struct
-from typing import Union, Type
+from typing import Union, Type, Dict
 
 from DyldExtractor.extraction_context import ExtractionContext
 
@@ -30,7 +30,7 @@ class _SymbolContext(object):
 
 		self.symbolsSize = 0
 
-		self._stringMap: dict[bytes, int] = {}
+		self._stringMap: Dict[bytes, int] = {}
 		self._stringLength = 0
 
 		# first string is \x00 historically
@@ -109,7 +109,7 @@ class _LinkeditOptimizer(object):
 
 		# Maps the old symbol indexes in the shared symbol table
 		# 	to the new indexes in the optimized index table.
-		self.oldToNewSymbolIndexes: dict[int, int] = {}
+		self.oldToNewSymbolIndexes: Dict[int, int] = {}
 
 		self.newWeakBindingInfoOffset = 0
 		self.newLazyBindingInfoOffset = 0

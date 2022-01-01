@@ -174,7 +174,7 @@ if "__main__" == __name__:
 	args = parser.parse_args(namespace=_DyldExtractorArgs)
 
 	# create a list of images
-	images: list[str] = []
+	images: List[str] = []
 	with open(args.dyld_path, "rb") as f:
 		dyldFileCtx = FileContext(f)
 		dyldCtx = DyldContext(dyldFileCtx)
@@ -190,7 +190,7 @@ if "__main__" == __name__:
 	summary = ""
 	with mp.Pool(args.jobs, initializer=_workerInitializer) as pool:
 		# create jobs for each image
-		jobs: list[tuple[str, mp.pool.AsyncResult]] = []
+		jobs: List[Tuple[str, mp.pool.AsyncResult]] = []
 		for index, imageName in enumerate(images):
 			jobs.append(
 				(imageName, pool.apply_async(_imageRunner, (args.dyld_path, index)))

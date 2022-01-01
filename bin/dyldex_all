@@ -254,7 +254,7 @@ def _main() -> None:
 		loggingLevel = logging.DEBUG
 
 	# create a list of image paths
-	imagePaths: list[str] = []
+	imagePaths: List[str] = []
 	with open(args.dyld_path, "rb") as f:
 		dyldFileCtx = FileContext(f)
 		dyldCtx = DyldContext(dyldFileCtx)
@@ -269,7 +269,7 @@ def _main() -> None:
 
 	with multiprocessing.Pool(initializer=_workerInitializer) as pool:
 		# Create a job for each image
-		jobs: list[tuple[str, multiprocessing.pool.AsyncResult]] = []
+		jobs: List[Tuple[str, multiprocessing.pool.AsyncResult]] = []
 		jobsComplete = 0
 		for i, imagePath in enumerate(imagePaths):
 			# The index should correspond with its index in the DSC
@@ -284,7 +284,7 @@ def _main() -> None:
 		)
 
 		# Record potential logging output for each job
-		jobOutputs: list[str] = []
+		jobOutputs: List[str] = []
 
 		# wait for all jobs
 		while len(jobs):
