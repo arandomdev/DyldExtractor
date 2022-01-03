@@ -54,6 +54,7 @@ class _V2Rebaser(object):
 		self.statusBar = extractionCtx.statusBar
 		self.logger = extractionCtx.logger
 		self.machoCtx = extractionCtx.machoCtx
+		self.ptrTracker = extractionCtx.ptrTracker
 
 		self.dyldCtx = mappingInfo.dyldCtx
 		self.mapping = mappingInfo.mapping
@@ -114,10 +115,11 @@ class _V2Rebaser(object):
 				pageAddr = (i * pageSize) + self.mapping.address
 				self.logger.warning(f"Unable to handle page extras at {hex(pageAddr)}")
 			elif (page & DYLD_CACHE_SLIDE_PAGE_ATTR_EXTRA) == 0:
+				pageAddr = (i * pageSize) + self.mapping.address
 				pageOff = (i * pageSize) + self.mapping.fileOffset
 
 				# The page offset are 32bit jumps
-				self._rebasePage(ctx, pageOff, page * 4)
+				self._rebasePage(ctx, pageAddr, pageOff, page * 4)
 
 				self.statusBar.update(status="Rebasing Pages")
 		pass
@@ -125,6 +127,7 @@ class _V2Rebaser(object):
 	def _rebasePage(
 		self,
 		ctx: MachOContext,
+		pageAddr: int,
 		pageStart: int,
 		pageOffset: int
 	) -> None:
@@ -156,6 +159,7 @@ class _V2Rebaser(object):
 				newValue += valueAdd
 
 			ctx.writeBytes(loc, struct.pack("<Q", newValue))
+			self.ptrTracker.addPtr(pageAddr + pageOffset)
 			pageOffset += delta
 		pass
 	pass
@@ -447,3 +451,5 @@ def processSlideInfo(extractionCtx: ExtractionContext) -> None:
 			_V3Rebaser(extractionCtx, info).run()
 		else:
 			logger.error("Unknown slide version.")
+		pass
+	pass

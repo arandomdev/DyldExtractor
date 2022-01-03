@@ -3,6 +3,7 @@ import logging
 
 from DyldExtractor.dyld.dyld_context import DyldContext
 from DyldExtractor.macho.macho_context import MachOContext
+from DyldExtractor.pointer_tracker import PointerTracker
 
 
 class ExtractionContext(object):
@@ -31,10 +32,13 @@ class ExtractionContext(object):
 	EXTRA_SEGMENT_NAME = b"__EXTRA_OBJC"
 	extraSegmentData: bytes
 
+	ptrTracker: PointerTracker
+
 	def __init__(
 		self,
 		dyldCtx: DyldContext,
 		machoCtx: MachOContext,
+		ptrTracker: PointerTracker,
 		statusBar: progressbar.ProgressBar,
 		logger: logging.Logger
 	) -> None:
@@ -42,6 +46,7 @@ class ExtractionContext(object):
 
 		self.dyldCtx = dyldCtx
 		self.machoCtx = machoCtx
+		self.ptrTracker = ptrTracker
 		self.statusBar = statusBar
 		self.logger = logger
 		pass
