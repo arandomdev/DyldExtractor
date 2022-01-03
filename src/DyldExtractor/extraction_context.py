@@ -3,7 +3,7 @@ import logging
 
 from DyldExtractor.dyld.dyld_context import DyldContext
 from DyldExtractor.macho.macho_context import MachOContext
-from DyldExtractor.pointer_tracker import PointerTracker
+from DyldExtractor.builder.pointer_tracker import PointerTracker
 
 
 class ExtractionContext(object):
