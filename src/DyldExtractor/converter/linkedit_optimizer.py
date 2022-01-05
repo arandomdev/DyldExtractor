@@ -3,6 +3,7 @@ from typing import Union, Type, Dict
 
 from DyldExtractor.dyld.dyld_context import DyldContext
 from DyldExtractor.extraction_context import ExtractionContext
+from DyldExtractor.builder.linkedit_builder import LinkeditBuilder
 
 from DyldExtractor.dyld.dyld_structs import (
 	dyld_cache_local_symbols_info,
@@ -11,14 +12,7 @@ from DyldExtractor.dyld.dyld_structs import (
 )
 
 from DyldExtractor.macho.macho_constants import *
-from DyldExtractor.macho.macho_structs import (
-	LoadCommands,
-	dyld_info_command,
-	dysymtab_command,
-	linkedit_data_command,
-	nlist_64,
-	symtab_command
-)
+from DyldExtractor.macho.macho_structs import nlist_64
 
 
 class _SymbolContext(object):
@@ -73,148 +67,122 @@ class _LinkeditOptimizer(object):
 	def __init__(self, extractionCtx: ExtractionContext) -> None:
 		super().__init__()
 
-		self.extractionCtx = extractionCtx
-		self.machoCtx = extractionCtx.machoCtx
-		self.dyldCtx = extractionCtx.dyldCtx
-		self.statusBar = extractionCtx.statusBar
-		self.logger = extractionCtx.logger
+		self._extractionCtx = extractionCtx
+		self._machoCtx = extractionCtx.machoCtx
+		self._dyldCtx = extractionCtx.dyldCtx
+		self._statusBar = extractionCtx.statusBar
+		self._logger = extractionCtx.logger
 
-		self.linkeditFile = self.machoCtx.ctxForAddr(
-			self.machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
+		self._symbolCtx = _SymbolContext()
+
+		# Create the linkedit builder
+		self._linkeditBuilder = LinkeditBuilder(extractionCtx.machoCtx)
+		self._linkeditCtx = self._machoCtx.ctxForAddr(
+			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
 		)
 
-		self.symTabCmd: symtab_command = None
-		self.dynSymTabCmd: dysymtab_command = None
-		self.dyldInfo: dyld_info_command = None
-		self.exportTrieCmd: linkedit_data_command = None
-		self.functionStartsCmd: linkedit_data_command = None
-		self.dataInCodeCmd: linkedit_data_command = None
+		# Setup for symtab and dysymtab
+		self._symtabCmd = self._linkeditBuilder.symtabData.command
+		if self._linkeditBuilder.dysymtabData is not None:
+			self._dysymtabCmd = self._linkeditBuilder.dysymtabData.command
+		else:
+			self._dysymtabCmd = None
 
-		for lc in self.machoCtx.loadCommands:
-			if lc.cmd == LoadCommands.LC_SYMTAB:
-				self.symTabCmd = lc
-			elif lc.cmd == LoadCommands.LC_DYSYMTAB:
-				self.dynSymTabCmd = lc
-			elif (
-				lc.cmd == LoadCommands.LC_DYLD_INFO
-				or lc.cmd == LoadCommands.LC_DYLD_INFO_ONLY
-			):
-				self.dyldInfo = lc
-			elif lc.cmd == LoadCommands.LC_FUNCTION_STARTS:
-				self.functionStartsCmd = lc
-			elif lc.cmd == LoadCommands.LC_DATA_IN_CODE:
-				self.dataInCodeCmd = lc
-			elif lc.cmd == LoadCommands.LC_DYLD_EXPORTS_TRIE:
-				self.exportTrieCmd = lc
+		self._newSymbolData = bytearray()
+		self._newIndirectSymData = bytearray()
+
+		self._newLocalSymbolsStartIndex = 0
+		self._newLocalSymbolCount = 0
+		self._newExportedSymbolsStartIndex = 0
+		self._newExportedSymbolCount = 0
+		self._newImportedSymbolsStartIndex = 0
+		self._newImportedSymbolCount = 0
 
 		# Maps the old symbol indexes in the shared symbol table
 		# 	to the new indexes in the optimized index table.
-		self.oldToNewSymbolIndexes: Dict[int, int] = {}
-
-		self.newWeakBindingInfoOffset = 0
-		self.newLazyBindingInfoOffset = 0
-		self.newBindingInfoOffset = 0
-		self.newExportInfoOffset = 0
-		self.newExportedSymbolsStartIndex = 0
-		self.newExportedSymbolCount = 0
-		self.newImportedSymbolsStartIndex = 0
-		self.newImportedSymbolCount = 0
-		self.newLocalSymbolsStartIndex = 0
-		self.newLocalSymbolCount = 0
-		self.newFunctionStartsOffset = 0
-		self.newDataInCodeOffset = 0
-		self.newIndirectSymbolTableOffset = 0
-
-		self.newStringPoolOffset = 0
-		self.newStringPoolSize = 0
-
-		self.newSymbolTableOffset = 0
-		self.redactedSymbolCount = 0
-		self.symbolCtx = None
+		self._oldToNewSymbolIndexes: Dict[int, int] = {}
 		pass
 
-	def copyWeakBindingInfo(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update(status="Copy Weak Binding Info")
+	def run(self) -> None:
+		self._addRedactedSymbol()
+		self._copyLocalSymbols()
+		self._copyExportedSymbols()
 
-		if not self.dyldInfo:
-			return
+		# This must be run last for stub_fixer
+		self._copyImportedSymbols()
 
-		size = self.dyldInfo.weak_bind_size
-		if size:
-			weakBindingInfo = self.linkeditFile.getBytes(
-				self.dyldInfo.weak_bind_off,
-				size
-			)
+		self._copyIndirectSymbolTable()
 
-			self.newWeakBindingInfoOffset = len(newLinkedit)
-			newLinkedit.extend(weakBindingInfo)
+		self._statusBar.update(status="Compiling string pool")
+		newStrings = self._symbolCtx.compileStrings()
 
-		self.statusBar.update()
+		# update linkedit
+		symtabData = self._linkeditBuilder.symtabData
+		symtabData.symbols = self._newSymbolData
+		symtabData.strings = newStrings
+
+		if self._dysymtabCmd is not None:
+			dysymtabData = self._linkeditBuilder.dysymtabData
+			dysymtabData.indirectSyms = self._newIndirectSymData
+
+			self._dysymtabCmd.ilocalsym = self._newLocalSymbolsStartIndex
+			self._dysymtabCmd.nlocalsym = self._newLocalSymbolCount
+			self._dysymtabCmd.iextdefsym = self._newExportedSymbolsStartIndex
+			self._dysymtabCmd.nextdefsym = self._newExportedSymbolCount
+			self._dysymtabCmd.iundefsym = self._newImportedSymbolsStartIndex
+			self._dysymtabCmd.nundefsym = self._newImportedSymbolCount
+			self._dysymtabCmd.tocoff = 0
+			self._dysymtabCmd.ntoc = 0
+			self._dysymtabCmd.modtaboff = 0
+			self._dysymtabCmd.nmodtab = 0
+			self._dysymtabCmd.extrefsymoff = 0
+			self._dysymtabCmd.locreloff = 0
+			self._dysymtabCmd.nlocrel = 0
+			pass
+
+		self._statusBar.update(status="Rebuilding linkedit")
+
+		# Rebuild in same location
+		linkeditOff = self._dyldCtx.convertAddr(
+			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
+		)[0]
+		self._linkeditBuilder.build(linkeditOff)
 		pass
 
-	def copyExportInfo(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update(status="Copy Export Info")
+	def _addRedactedSymbol(self) -> None:
+		"""Adds a redacted symbol entry if needed.
 
-		if not self.dyldInfo and not self.exportTrieCmd:
-			return
+			Some images have indirect symbols that point to the zeroth
+		symbol entry. This is probaby a stripped symbol and may be
+		unrecoverable.
 
-		if self.exportTrieCmd:
-			exportOff = self.exportTrieCmd.dataoff
-			exportSize = self.exportTrieCmd.datasize
-		else:
-			exportOff = self.dyldInfo.export_off
-			exportSize = self.dyldInfo.export_size
+		This provides a "redacted" entry for those special cases so that
+		some disassemblers don't name functions incorrectly.
+		"""
 
-		if exportSize:
-			exportInfo = self.linkeditFile.getBytes(exportOff, exportSize)
+		self._statusBar.update(status="Search Redacted Symbols")
 
-			self.newExportInfoOffset = len(newLinkedit)
-			newLinkedit.extend(exportInfo)
+		indirectStart = self._dysymtabCmd.indirectsymoff
+		indirectEnd = indirectStart + (self._dysymtabCmd.nindirectsyms * 4)
+		for offset in range(indirectStart, indirectEnd, 4):
+			symbolIndex = self._linkeditCtx.getBytes(offset, 4)
+			if symbolIndex == b"\x00\x00\x00\x00":
+				self._extractionCtx.hasRedactedIndirect = True
 
-		self.statusBar.update()
+				stringIndex = self._symbolCtx.addString(b"<redacted>\x00")
+				self._symbolCtx.symbolsSize += 1
+
+				symbolEntry = nlist_64()
+				symbolEntry.n_strx = stringIndex
+				symbolEntry.n_type = 1
+				self._newSymbolData.extend(symbolEntry)
+				break
+
+			self._statusBar.update()
+			pass
 		pass
 
-	def copyBindingInfo(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update(status="Copy Binding Info")
-
-		if not self.dyldInfo:
-			return
-
-		size = self.dyldInfo.bind_size
-		if size:
-			bindingInfo = self.linkeditFile.getBytes(self.dyldInfo.bind_off, size)
-
-			self.newBindingInfoOffset = len(newLinkedit)
-			newLinkedit.extend(bindingInfo)
-
-		self.statusBar.update()
-		pass
-
-	def copyLazyBindingInfo(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update(status="Copy Lazy Binding Info")
-
-		if not self.dyldInfo:
-			return
-
-		size = self.dyldInfo.lazy_bind_size
-		if size:
-			lazyBindingInfo = self.linkeditFile.getBytes(
-				self.dyldInfo.lazy_bind_off,
-				size
-			)
-
-			self.newLazyBindingInfoOffset = len(newLinkedit)
-			newLinkedit.extend(lazyBindingInfo)
-
-		self.statusBar.update()
-		pass
-
-	def startSymbolContext(self, newLinkedit: bytearray) -> None:
-		self.symbolCtx = _SymbolContext()
-		self.newSymbolTableOffset = len(newLinkedit)
-		pass
-
-	def getLocalSymsEntryStruct(
+	def _getLocalSymsEntryStruct(
 		self,
 		symbolsCache: DyldContext,
 		symbolsInfo: dyld_cache_local_symbols_info
@@ -230,9 +198,9 @@ class _LinkeditOptimizer(object):
 
 		# get the offset to the first image, and to the
 		# second image. Assumes that they are next to each other.
-		image1 = self.dyldCtx.convertAddr(self.dyldCtx.images[0].address)[0]
+		image1 = self._dyldCtx.convertAddr(self._dyldCtx.images[0].address)[0]
 		image1 = struct.pack("<I", image1)
-		image2 = self.dyldCtx.convertAddr(self.dyldCtx.images[1].address)[0]
+		image2 = self._dyldCtx.convertAddr(self._dyldCtx.images[1].address)[0]
 		image2 = struct.pack("<I", image2)
 
 		entriesOff = symbolsInfo._fileOff_ + symbolsInfo.entriesOffset
@@ -247,26 +215,26 @@ class _LinkeditOptimizer(object):
 		else:
 			return None
 
-	def copyLocalSymbols(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update(status="Copy Local Symbols")
+	def _copyLocalSymbols(self) -> None:
+		self._statusBar.update(status="Copy Local Symbols")
 
-		symbolsCache = self.dyldCtx.getSymbolsCache()
+		symbolsCache = self._dyldCtx.getSymbolsCache()
 		localSymbolsInfo = dyld_cache_local_symbols_info(
 			symbolsCache.file,
 			symbolsCache.header.localSymbolsOffset
 		)
 
-		entryStruct = self.getLocalSymsEntryStruct(
+		entryStruct = self._getLocalSymsEntryStruct(
 			symbolsCache,
 			localSymbolsInfo
 		)
 		if not entryStruct:
-			self.logger.error("Unable to get local symbol entries structure.")
+			self._logger.error("Unable to get local symbol entries structure.")
 			return
 
 		dylibOffset = (
-			self.machoCtx.segments[b"__TEXT"].seg.vmaddr
-			- self.dyldCtx.header.sharedRegionStart
+			self._machoCtx.segments[b"__TEXT"].seg.vmaddr
+			- self._dyldCtx.header.sharedRegionStart
 		)
 
 		localSymbolsEntriesInfo = None
@@ -280,11 +248,11 @@ class _LinkeditOptimizer(object):
 				break
 
 		if not localSymbolsEntriesInfo:
-			self.logger.warning("Unable to find local symbol entries.")
+			self._logger.warning("Unable to find local symbol entries.")
 			return
 
-		self.newLocalSymbolsStartIndex = self.symbolCtx.symbolsSize
-		self.newLocalSymbolCount = 0
+		self._newLocalSymbolsStartIndex = self._symbolCtx.symbolsSize
+		self._newLocalSymbolCount = 0
 
 		# copy local symbols and their strings
 		entriesStart = (
@@ -304,176 +272,103 @@ class _LinkeditOptimizer(object):
 			name = symbolsCache.readString(symbolStrOff + symbolEnt.n_strx)
 
 			# copy data
-			self.newLocalSymbolCount += 1
-			self.symbolCtx.symbolsSize += 1
+			self._newLocalSymbolCount += 1
+			self._symbolCtx.symbolsSize += 1
 
-			symbolEnt.n_strx = self.symbolCtx.addString(name)
-			newLinkedit.extend(symbolEnt)
+			symbolEnt.n_strx = self._symbolCtx.addString(name)
+			self._newSymbolData.extend(symbolEnt)
 
-			self.statusBar.update()
-		pass
-
-	def copyExportedSymbols(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update("Copy Exported Symbols")
-
-		self.newExportedSymbolsStartIndex = self.symbolCtx.symbolsSize
-		self.newExportedSymbolCount = 0
-
-		if not self.dynSymTabCmd:
-			self.logger.warning("Unable to copy exported symbols.")
-			return
-
-		# Copy entries and symbols
-		entriesStart = self.dynSymTabCmd.iextdefsym
-		entriesEnd = entriesStart + self.dynSymTabCmd.nextdefsym
-
-		symbolStrOff = self.symTabCmd.stroff
-
-		for entryIndex in range(entriesStart, entriesEnd):
-			entryOff = self.symTabCmd.symoff + (entryIndex * nlist_64.SIZE)
-			entry = nlist_64(self.linkeditFile.file, entryOff)
-
-			nameOff = symbolStrOff + entry.n_strx
-			name = self.linkeditFile.readString(nameOff)
-
-			# update variables and copy
-			self.oldToNewSymbolIndexes[entryIndex] = self.symbolCtx.symbolsSize
-
-			self.newExportedSymbolCount += 1
-			self.symbolCtx.symbolsSize += 1
-
-			entry.n_strx = self.symbolCtx.addString(name)
-			newLinkedit.extend(entry)
-
-			self.statusBar.update()
-		pass
-
-	def copyImportedSymbols(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update(status="Copy Imported Symbols")
-
-		self.newImportedSymbolsStartIndex = self.symbolCtx.symbolsSize
-		self.newImportedSymbolCount = 0
-
-		if not self.dynSymTabCmd:
-			self.logger.warning("Unable to copy imported symbols")
-			return
-
-		# Copy entries and symbols
-		entriesStart = self.dynSymTabCmd.iundefsym
-		entriesEnd = entriesStart + self.dynSymTabCmd.nundefsym
-
-		symbolStrOff = self.symTabCmd.stroff
-
-		for entryIndex in range(entriesStart, entriesEnd):
-			entryOff = self.symTabCmd.symoff + (entryIndex * nlist_64.SIZE)
-			entry = nlist_64(self.linkeditFile.file, entryOff)
-
-			nameOff = symbolStrOff + entry.n_strx
-			name = self.linkeditFile.readString(nameOff)
-
-			# update variables and copy
-			self.oldToNewSymbolIndexes[entryIndex] = self.symbolCtx.symbolsSize
-
-			self.newImportedSymbolCount += 1
-			self.symbolCtx.symbolsSize += 1
-
-			entry.n_strx = self.symbolCtx.addString(name)
-			newLinkedit.extend(entry)
-
-			self.statusBar.update()
-
-		# make room for the indirect symbol entries that may
-		# be fixed in stub_fixer
-		if self.redactedSymbolCount:
-			newLinkedit.extend(b"\x00" * (self.redactedSymbolCount * nlist_64.SIZE))
-		pass
-
-	def addRedactedSymbol(self, newLinkedit: bytearray) -> None:
-		"""Adds a redacted symbol entry if needed.
-
-			Some images have indirect symbols that point to the zeroth
-		symbol entry. This is probaby a stripped symbol and is basically
-		unrecoverable.
-
-		This provides a "redacted" entry for those special cases so that
-		some disassemblers don't name functions incorrectly.
-		"""
-
-		self.statusBar.update(status="Search Redacted Symbols")
-
-		self.redactedSymbolCount = 0
-
-		indirectStart = self.dynSymTabCmd.indirectsymoff
-		indirectEnd = indirectStart + (self.dynSymTabCmd.nindirectsyms * 4)
-		for offset in range(indirectStart, indirectEnd, 4):
-			symbolIndex = self.linkeditFile.getBytes(offset, 4)
-			if symbolIndex == b"\x00\x00\x00\x00":
-				self.redactedSymbolCount += 1
-
-			self.statusBar.update()
+			self._statusBar.update()
 			pass
-
-		if self.redactedSymbolCount:
-			stringIndex = self.symbolCtx.addString(b"<redacted>\x00")
-			self.symbolCtx.symbolsSize += 1
-
-			symbolEntry = nlist_64()
-			symbolEntry.n_strx = stringIndex
-			symbolEntry.n_type = 1
-			newLinkedit.extend(symbolEntry)
-
-			self.extractionCtx.hasRedactedIndirect = True
 		pass
 
-	def copyFunctionStarts(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update(status="Copy Function Starts")
+	def _copyExportedSymbols(self) -> None:
+		self._statusBar.update("Copy Exported Symbols")
 
-		if not self.functionStartsCmd:
+		self._newExportedSymbolsStartIndex = self._symbolCtx.symbolsSize
+		self._newExportedSymbolCount = 0
+
+		if self._dysymtabCmd is None:
+			self._logger.warning("Unable to copy exported symbols.")
 			return
 
-		self.newFunctionStartsOffset = len(newLinkedit)
+		# Copy entries and symbols
+		entriesStart = self._dysymtabCmd.iextdefsym
+		entriesEnd = entriesStart + self._dysymtabCmd.nextdefsym
 
-		size = self.functionStartsCmd.datasize
-		functionStarts = self.linkeditFile.getBytes(
-			self.functionStartsCmd.dataoff,
-			size
-		)
-		newLinkedit.extend(functionStarts)
+		symbolStrOff = self._symtabCmd.stroff
 
-		self.statusBar.update()
+		for entryIndex in range(entriesStart, entriesEnd):
+			entryOff = self._symtabCmd.symoff + (entryIndex * nlist_64.SIZE)
+			entry = nlist_64(self._linkeditCtx.file, entryOff)
+
+			nameOff = symbolStrOff + entry.n_strx
+			name = self._linkeditCtx.readString(nameOff)
+
+			# update variables and copy
+			self._oldToNewSymbolIndexes[entryIndex] = self._symbolCtx.symbolsSize
+
+			self._newExportedSymbolCount += 1
+			self._symbolCtx.symbolsSize += 1
+
+			entry.n_strx = self._symbolCtx.addString(name)
+			self._newSymbolData.extend(entry)
+
+			self._statusBar.update()
+			pass
 		pass
 
-	def copyDataInCode(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update(status="Copy Data In Code")
+	def _copyImportedSymbols(self) -> None:
+		self._statusBar.update(status="Copy Imported Symbols")
 
-		if not self.dataInCodeCmd:
+		self._newImportedSymbolsStartIndex = self._symbolCtx.symbolsSize
+		self._newImportedSymbolCount = 0
+
+		if not self._dysymtabCmd:
+			self._logger.warning("Unable to copy imported symbols")
 			return
 
-		self.newDataInCodeOffset = len(newLinkedit)
+		# Copy entries and symbols
+		entriesStart = self._dysymtabCmd.iundefsym
+		entriesEnd = entriesStart + self._dysymtabCmd.nundefsym
 
-		size = self.dataInCodeCmd.datasize
-		dataInCode = self.linkeditFile.getBytes(self.dataInCodeCmd.dataoff, size)
-		newLinkedit.extend(dataInCode)
+		symbolStrOff = self._symtabCmd.stroff
 
-		self.statusBar.update()
+		for entryIndex in range(entriesStart, entriesEnd):
+			entryOff = self._symtabCmd.symoff + (entryIndex * nlist_64.SIZE)
+			entry = nlist_64(self._linkeditCtx.file, entryOff)
+
+			nameOff = symbolStrOff + entry.n_strx
+			name = self._linkeditCtx.readString(nameOff)
+
+			# update variables and copy
+			self._oldToNewSymbolIndexes[entryIndex] = self._symbolCtx.symbolsSize
+
+			self._newImportedSymbolCount += 1
+			self._symbolCtx.symbolsSize += 1
+
+			entry.n_strx = self._symbolCtx.addString(name)
+			self._newSymbolData.extend(entry)
+
+			self._statusBar.update()
+			pass
 		pass
 
-	def copyIndirectSymbolTable(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update(status="Copy Indirect Symbol Table")
+	def _copyIndirectSymbolTable(self) -> None:
+		self._statusBar.update(status="Copy Indirect Symbol Table")
 
-		self.newIndirectSymbolTableOffset = len(newLinkedit)
-
-		if not self.dynSymTabCmd:
+		if not self._dysymtabCmd:
+			self._logger.warning("Unable to copy indirect symbol table")
 			return
 
 		entriesEnd = (
-			self.dynSymTabCmd.indirectsymoff
-			+ (self.dynSymTabCmd.nindirectsyms * 4)
+			self._dysymtabCmd.indirectsymoff
+			+ (self._dysymtabCmd.nindirectsyms * 4)
 		)
 
-		for offset in range(self.dynSymTabCmd.indirectsymoff, entriesEnd, 4):
+		for offset in range(self._dysymtabCmd.indirectsymoff, entriesEnd, 4):
 			# Each entry is a 32bit index into the symbol table
-			symbol = self.linkeditFile.getBytes(offset, 4)
+			symbol = self._linkeditCtx.getBytes(offset, 4)
 			symbolIndex = struct.unpack("<I", symbol)[0]
 
 			if (
@@ -482,88 +377,16 @@ class _LinkeditOptimizer(object):
 				or symbolIndex == 0
 			):
 				# Do nothing to the entry
-				newLinkedit.extend(symbol)
+				self._newIndirectSymData.extend(symbol)
 				continue
 
-			newSymbolIndex = self.oldToNewSymbolIndexes[symbolIndex]
-			newLinkedit.extend(struct.pack("<I", newSymbolIndex))
+			newSymbolIndex = self._oldToNewSymbolIndexes[symbolIndex]
+			self._newIndirectSymData.extend(struct.pack("<I", newSymbolIndex))
 
-			self.statusBar.update()
+			self._statusBar.update()
+			pass
 		pass
-
-	def copyStringPool(self, newLinkedit: bytearray) -> None:
-		self.statusBar.update(status="Copy String Pool")
-
-		stringPool = self.symbolCtx.compileStrings()
-
-		self.newStringPoolOffset = len(newLinkedit)
-		self.newStringPoolSize = len(stringPool)
-		newLinkedit.extend(stringPool)
-
-		self.statusBar.update()
-		pass
-
-	def updateLoadCommands(
-		self,
-		newLinkedit: bytearray,
-		newLinkeditOff: int
-	) -> None:
-		# update __LINKEDIT segment
-		LinkeditSeg = self.machoCtx.segments[b"__LINKEDIT"].seg
-		LinkeditSeg.fileoff = newLinkeditOff
-		LinkeditSeg.filesize = len(newLinkedit)
-		LinkeditSeg.vmsize = len(newLinkedit)
-
-		# update Symbol table
-		self.symTabCmd.symoff = newLinkeditOff + self.newSymbolTableOffset
-		self.symTabCmd.nsyms = self.symbolCtx.symbolsSize
-
-		self.symTabCmd.stroff = newLinkeditOff + self.newStringPoolOffset
-		self.symTabCmd.strsize = self.newStringPoolSize
-
-		# update Dynamic Symbol table
-		if self.dynSymTabCmd:
-			self.dynSymTabCmd.ilocalsym = self.newLocalSymbolsStartIndex
-			self.dynSymTabCmd.nlocalsym = self.newLocalSymbolCount
-			self.dynSymTabCmd.iextdefsym = self.newExportedSymbolsStartIndex
-			self.dynSymTabCmd.nextdefsym = self.newExportedSymbolCount
-			self.dynSymTabCmd.iundefsym = self.newImportedSymbolsStartIndex
-			self.dynSymTabCmd.nundefsym = self.newImportedSymbolCount
-			self.dynSymTabCmd.tocoff = 0
-			self.dynSymTabCmd.ntoc = 0
-			self.dynSymTabCmd.modtaboff = 0
-			self.dynSymTabCmd.nmodtab = 0
-
-			indirectsymOff = newLinkeditOff + self.newIndirectSymbolTableOffset
-			self.dynSymTabCmd.indirectsymoff = indirectsymOff
-
-			self.dynSymTabCmd.extrefsymoff = 0
-			self.dynSymTabCmd.locreloff = 0
-			self.dynSymTabCmd.nlocrel = 0
-
-		# update dyld info and exports
-		dyldInfo = self.dyldInfo
-		if dyldInfo:
-			if dyldInfo.bind_size:
-				dyldInfo.bind_off = newLinkeditOff + self.newBindingInfoOffset
-			if dyldInfo.weak_bind_size:
-				dyldInfo.weak_bind_off = newLinkeditOff + self.newWeakBindingInfoOffset
-			if dyldInfo.lazy_bind_size:
-				dyldInfo.lazy_bind_off = newLinkeditOff + self.newLazyBindingInfoOffset
-			if dyldInfo.export_size:
-				dyldInfo.export_off = newLinkeditOff + self.newExportInfoOffset
-		elif self.exportTrieCmd:
-			self.exportTrieCmd.dataoff = newLinkeditOff + self.newExportInfoOffset
-
-		# update Function starts
-		functionStartsCmd = self.functionStartsCmd
-		if functionStartsCmd:
-			functionStartsCmd.dataoff = newLinkeditOff + self.newFunctionStartsOffset
-
-		# update data-in-code
-		if self.dataInCodeCmd:
-			self.dataInCodeCmd.dataoff = newLinkeditOff + self.newDataInCodeOffset
-		pass
+	pass
 
 
 def optimizeLinkedit(extractionCtx: ExtractionContext) -> None:
@@ -581,48 +404,5 @@ def optimizeLinkedit(extractionCtx: ExtractionContext) -> None:
 	"""
 
 	extractionCtx.statusBar.update(unit="Optimize Linkedit")
-
-	newLinkedit = bytearray()
-
-	optimizer = _LinkeditOptimizer(extractionCtx)
-
-	optimizer.copyBindingInfo(newLinkedit)
-	optimizer.copyWeakBindingInfo(newLinkedit)
-	optimizer.copyLazyBindingInfo(newLinkedit)
-	optimizer.copyExportInfo(newLinkedit)
-
-	# copy symbol entries
-	optimizer.startSymbolContext(newLinkedit)
-	optimizer.addRedactedSymbol(newLinkedit)
-	optimizer.copyLocalSymbols(newLinkedit)
-	optimizer.copyExportedSymbols(newLinkedit)
-	# this needs to be run last because we might need to add
-	# more space for redacted indirect symbols.
-	optimizer.copyImportedSymbols(newLinkedit)
-
-	optimizer.copyFunctionStarts(newLinkedit)
-	optimizer.copyDataInCode(newLinkedit)
-
-	# Copy Indirect Symbol Table
-	optimizer.copyIndirectSymbolTable(newLinkedit)
-
-	# make sure the new linkedit is 8-bit aligned
-	if (len(newLinkedit) % 8) != 0:
-		newLinkedit.extend(b"\x00" * 4)
-
-	optimizer.copyStringPool(newLinkedit)
-
-	# Align again
-	if (len(newLinkedit) % 8) != 0:
-		newLinkedit.extend(b"\x00" * 4)
-
-	# Set the new linkedit in the same location
-	newLinkeditOff = extractionCtx.machoCtx.segments[b"__LINKEDIT"].seg.fileoff
-	linkeditFile = extractionCtx.machoCtx.ctxForAddr(
-		extractionCtx.machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
-	)
-	linkeditFile.writeBytes(newLinkeditOff, newLinkedit)
-
-	optimizer.updateLoadCommands(newLinkedit, newLinkeditOff)
-
-	extractionCtx.statusBar.update()
+	_LinkeditOptimizer(extractionCtx).run()
+	pass

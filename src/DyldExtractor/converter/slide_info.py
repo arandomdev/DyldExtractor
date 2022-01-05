@@ -8,6 +8,7 @@ from typing import (
 	List
 )
 
+from DyldExtractor.builder.pointer_tracker import PointerTracker
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.dyld.dyld_context import DyldContext
@@ -436,6 +437,7 @@ def processSlideInfo(extractionCtx: ExtractionContext) -> None:
 		The processed file.
 	"""
 
+	extractionCtx.ptrTracker = PointerTracker()
 	logger = extractionCtx.logger
 
 	# get a list of mapping and slide info

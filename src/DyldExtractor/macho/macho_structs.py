@@ -212,30 +212,6 @@ class lc_str(Structure):
 	]
 
 
-class Fvmlib(Structure):
-	name: lc_str 		# library's target pathname
-	minor_version: int 	# library's minor version number
-	header_addr: int 	# library's header address
-
-	_fields_ = [
-		("name", lc_str),
-		("minor_version", c_uint32),
-		("header_addr", c_uint32),
-	]
-
-
-class fvmlib_command(Structure):
-	cmd: int 			# LC_IDFVMLIB or LC_LOADFVMLIB
-	cmdsize: int 		# includes pathname string
-	fvmlib: Fvmlib		# the library identification
-
-	_fields_ = [
-		("cmd", c_uint32),
-		("cmdsize", c_uint32),
-		("fvmlib", Fvmlib),
-	]
-
-
 class Dylib(Structure):
 	name: lc_str 				# library's path name
 	timestamp: int 				# library's build time stamp
@@ -308,22 +284,6 @@ class sub_library_command(Structure):
 		("cmd", c_uint32),
 		("cmdsize", c_uint32),
 		("sub_library", lc_str),
-	]
-
-
-class prebound_dylib_command(Structure):
-	cmd: int					# LC_PREBOUND_DYLIB
-	cmdsize: int				# includes strings
-	name: lc_str				# library's path name
-	nmodules: int				# number of modules in library
-	linked_modules: lc_str		# bit vector of linked modules
-
-	_fields_ = [
-		("cmd", c_uint32),
-		("cmdsize", c_uint32),
-		("name", lc_str),
-		("nmodules", c_uint32),
-		("linked_modules", lc_str),
 	]
 
 
@@ -470,18 +430,6 @@ class dysymtab_command(Structure):
 	]
 
 
-class prebind_cksum_command(Structure):
-	cmd: int 		# LC_PREBIND_CKSUM
-	cmdsize: int 	# sizeof(struct prebind_cksum_command)
-	cksum: int 		# the check sum or zero
-
-	_fields_ = [
-		("cmd", c_uint32),
-		("cmdsize", c_uint32),
-		("cksum", c_uint32),
-	]
-
-
 class uuid_command(Structure):
 	cmd: int 		# LC_UUID
 	cmdsize: int 	# sizeof(struct uuid_command)
@@ -522,24 +470,6 @@ class linkedit_data_command(Structure):
 		("cmdsize", c_uint32),
 		("dataoff", c_uint32),
 		("datasize", c_uint32),
-	]
-
-
-class fileset_entry_command(Structure):
-	cmd: int 		# LC_FILESET_ENTRY
-	cmdsize: int 	# includes id string
-	vmaddr: int 	# memory address of the dylib
-	fileoff: int 	# file offset of the dylib
-	entry_id: int 	# contained entry id
-	reserved: int 	# entry_id is 32-bits long, so this is the reserved padding
-
-	_fields_ = [
-		("cmd", c_uint32),
-		("cmdsize", c_uint32),
-		("vmaddr", c_uint64),
-		("fileoff", c_uint64),
-		("entry_id", lc_str),
-		("reserved", c_uint32),
 	]
 
 
@@ -649,44 +579,6 @@ class linker_option_command(Structure):
 	]
 
 
-class symseg_command(Structure):
-	cmd: int		# LC_SYMSEG
-	cmdsize: int 	# sizeof(struct symseg_command)
-	offset: int		# symbol segment offset
-	size: int		# symbol segment size in bytes
-
-	_fields_ = [
-		("cmd", c_uint32),
-		("cmdsize", c_uint32),
-		("offset", c_uint32),
-		("size", c_uint32),
-	]
-
-
-class ident_command(Structure):
-	cmd: int 		# LC_IDENT
-	cmdsize: int 	# strings that follow this command
-
-	_fields_ = [
-		("cmd", c_uint32),
-		("cmdsize", c_uint32),
-	]
-
-
-class fvmfile_command(Structure):
-	cmd: int 			# LC_FVMFILE
-	cmdsize: int 		# includes pathname string
-	name: lc_str 		# files pathname
-	header_addr: int 	# files virtual address
-
-	_fields_ = [
-		("cmd", c_uint32),
-		("cmdsize", c_uint32),
-		("name", lc_str),
-		("header_addr", c_uint32),
-	]
-
-
 class entry_point_command(Structure):
 	cmd: int 		# LC_MAIN only used in MH_EXECUTE filetypes
 	cmdsize: int 	# 24
@@ -718,27 +610,27 @@ LoadCommandMap = {
 
 	# LoadCommands.LC_SEGMENT: None,
 	LoadCommands.LC_SYMTAB: symtab_command,
-	LoadCommands.LC_SYMSEG: symseg_command,
+	# LoadCommands.LC_SYMSEG: None,
 	# LoadCommands.LC_THREAD: None,
 	# LoadCommands.LC_UNIXTHREAD: None,
-	LoadCommands.LC_LOADFVMLIB: fvmlib_command,
-	LoadCommands.LC_IDFVMLIB: fvmlib_command,
-	LoadCommands.LC_IDENT: ident_command,
-	LoadCommands.LC_FVMFILE: fvmfile_command,
+	# LoadCommands.LC_LOADFVMLIB: None,
+	# LoadCommands.LC_IDFVMLIB: None,
+	# LoadCommands.LC_IDENT: None,
+	# LoadCommands.LC_FVMFILE: None,
 	# LoadCommands.LC_PREPAGE: None,
 	LoadCommands.LC_DYSYMTAB: dysymtab_command,
 	LoadCommands.LC_LOAD_DYLIB: dylib_command,
 	LoadCommands.LC_ID_DYLIB: dylib_command,
 	LoadCommands.LC_LOAD_DYLINKER: dylinker_command,
 	LoadCommands.LC_ID_DYLINKER: dylinker_command,
-	LoadCommands.LC_PREBOUND_DYLIB: prebound_dylib_command,
+	# LoadCommands.LC_PREBOUND_DYLIB: None,
 	# LoadCommands.LC_ROUTINES: None,
 	LoadCommands.LC_SUB_FRAMEWORK: sub_framework_command,
 	LoadCommands.LC_SUB_UMBRELLA: sub_umbrella_command,
 	LoadCommands.LC_SUB_CLIENT: sub_client_command,
 	LoadCommands.LC_SUB_LIBRARY: sub_library_command,
 	# LoadCommands.LC_TWOLEVEL_HINTS: None,
-	LoadCommands.LC_PREBIND_CKSUM: prebind_cksum_command,
+	# LoadCommands.LC_PREBIND_CKSUM: None,
 	LoadCommands.LC_LOAD_WEAK_DYLIB: dylib_command,
 	LoadCommands.LC_SEGMENT_64: segment_command_64,
 	LoadCommands.LC_ROUTINES_64: routines_command_64,
@@ -769,7 +661,7 @@ LoadCommandMap = {
 	LoadCommands.LC_BUILD_VERSION: build_version_command,
 	LoadCommands.LC_DYLD_EXPORTS_TRIE: linkedit_data_command,
 	LoadCommands.LC_DYLD_CHAINED_FIXUPS: linkedit_data_command,
-	LoadCommands.LC_FILESET_ENTRY: fileset_entry_command,
+	# LoadCommands.LC_FILESET_ENTRY: None,
 }
 
 

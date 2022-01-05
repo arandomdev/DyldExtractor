@@ -1,4 +1,4 @@
-from typing import List
+from typing import Set
 
 
 class PointerTracker(object):
@@ -8,17 +8,13 @@ class PointerTracker(object):
 		"""
 
 		super().__init__()
-		self.ptrLocs: List[int] = []
+		self.ptrLocs: Set[int] = set()
 		pass
 
 	def addPtr(self, addr: int) -> None:
 		"""Add a pointer to the tracker.
 		"""
 
-		if addr in self.ptrLocs:
-			return
-		else:
-			self.ptrLocs.append(addr)
-			pass
+		self.ptrLocs.add(addr)
 		pass
 	pass

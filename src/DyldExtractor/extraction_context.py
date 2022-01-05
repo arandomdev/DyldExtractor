@@ -18,13 +18,6 @@ class ExtractionContext(object):
 	statusBar: progressbar.ProgressBar
 	logger: logging.Logger
 
-	"""
-		If this variable is true, the following is true,
-		* There are redacted indirect symbol entries
-		* Space was allocated for the redacted symbol entries
-			* This space is placed at the end of the symbol table
-		* The string table to at the end of the LINKEDIT segment.
-	"""
 	hasRedactedIndirect: bool = False
 
 	# The name of the extra data segment
@@ -38,7 +31,6 @@ class ExtractionContext(object):
 		self,
 		dyldCtx: DyldContext,
 		machoCtx: MachOContext,
-		ptrTracker: PointerTracker,
 		statusBar: progressbar.ProgressBar,
 		logger: logging.Logger
 	) -> None:
@@ -46,7 +38,6 @@ class ExtractionContext(object):
 
 		self.dyldCtx = dyldCtx
 		self.machoCtx = machoCtx
-		self.ptrTracker = ptrTracker
 		self.statusBar = statusBar
 		self.logger = logger
 		pass

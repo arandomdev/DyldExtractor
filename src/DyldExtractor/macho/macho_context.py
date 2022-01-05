@@ -132,7 +132,7 @@ class MachOContext(FileContext):
 
 			command = LoadCommandMap.get(cmd, UnknownLoadCommand)
 			if command == UnknownLoadCommand:
-				raise Exception(f"Unknown LoadCommand: {cmd}")
+				raise Exception(f"Unknown LoadCommand: {hex(cmd)}")
 
 			command = command(self.file, cmdOff)
 

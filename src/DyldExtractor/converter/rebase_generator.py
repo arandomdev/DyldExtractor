@@ -44,7 +44,7 @@ class _RegularRebaseGenerator(object):
 		sortedPtrs = {}
 		ptrsSorted = 0
 
-		ptrs = self._ptrs.sort()
+		ptrs = sorted(self._ptrs)
 		for segI, seg in enumerate(self._machoCtx.segmentsI):
 			seg = seg.seg
 			lowBound = bisect.bisect_left(ptrs, seg.vmaddr)

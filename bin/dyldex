@@ -14,7 +14,6 @@ except AttributeError:
 	print("progressbar is installed but progressbar2 required.", file=sys.stderr)
 	exit(1)
 
-from DyldExtractor.builder.pointer_tracker import PointerTracker
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.dyld.dyld_context import DyldContext
@@ -158,13 +157,9 @@ def _extractImage(
 			)
 			pass
 
-		# Set up pointer tracking
-		ptrTracker = PointerTracker()
-
 		extractionCtx = ExtractionContext(
 			dyldCtx,
 			machoCtx,
-			ptrTracker,
 			statusBar,
 			logger
 		)

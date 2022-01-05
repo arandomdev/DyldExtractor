@@ -1,17 +1,9 @@
 from dataclasses import dataclass
 from typing import List
 
+from DyldExtractor.builder.linkedit_builder import LinkeditBuilder
 from DyldExtractor.extraction_context import ExtractionContext
-from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.file_context import FileContext
-
-from DyldExtractor.macho.macho_structs import (
-	linkedit_data_command,
-	dyld_info_command,
-	symtab_command,
-	dysymtab_command,
-	routines_command_64,
-)
 
 
 _PAGE_SIZE = 0x4000
@@ -42,40 +34,6 @@ class BytesFileContext(object):
 	pass
 
 
-def _updateLinkEdit(
-	machoCtx: MachOContext,
-	shiftDelta: int
-) -> None:
-	"""Adjust file offsets for LinkEdit LoadCommands.
-	"""
-
-	for lc in machoCtx.loadCommands:
-		if isinstance(lc, linkedit_data_command):
-			lc.dataoff += shiftDelta if lc.dataoff else 0
-
-		elif isinstance(lc, dyld_info_command):
-			lc.rebase_off += shiftDelta if lc.rebase_off else 0
-			lc.bind_off += shiftDelta if lc.bind_off else 0
-			lc.weak_bind_off += shiftDelta if lc.weak_bind_off else 0
-			lc.lazy_bind_off += shiftDelta if lc.lazy_bind_off else 0
-			lc.export_off += shiftDelta if lc.export_off else 0
-
-		elif isinstance(lc, symtab_command):
-			lc.symoff += shiftDelta if lc.symoff else 0
-			lc.stroff += shiftDelta if lc.stroff else 0
-
-		elif isinstance(lc, dysymtab_command):
-			lc.tocoff += shiftDelta if lc.tocoff else 0
-			lc.modtaboff += shiftDelta if lc.modtaboff else 0
-			lc.extrefsymoff += shiftDelta if lc.extrefsymoff else 0
-			lc.indirectsymoff += shiftDelta if lc.indirectsymoff else 0
-			lc.extreloff += shiftDelta if lc.extreloff else 0
-			lc.locreloff += shiftDelta if lc.locreloff else 0
-
-		elif isinstance(lc, routines_command_64):
-			lc.init_address += shiftDelta if lc.init_address else 0
-
-
 def optimizeOffsets(extractionCtx: ExtractionContext) -> List[WriteProcedure]:
 	"""Adjusts file offsets.
 
@@ -101,6 +59,7 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> List[WriteProcedure]:
 	dataHead = 0
 
 	for segname, segment in machoCtx.segments.items():
+		# TODO: Don't trust fileoff
 		shiftDelta = dataHead - segment.seg.fileoff
 
 		if segname == extractionCtx.EXTRA_SEGMENT_NAME:
@@ -122,13 +81,15 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> List[WriteProcedure]:
 		writeProcedures.append(procedure)
 
 		if segname == b"__LINKEDIT":
-			_updateLinkEdit(machoCtx, shiftDelta)
+			# Linkedit Builder already handles the offsets
+			LinkeditBuilder(machoCtx).build(dataHead)
 			pass
-
-		# Change the offsets for the segment and section structures
-		segment.seg.fileoff += shiftDelta
-		for sect in segment.sects.values():
-			sect.offset = max(sect.offset + shiftDelta, 0)
+		else:
+			# Change the offsets for the segment and section structures
+			segment.seg.fileoff += shiftDelta
+			for sect in segment.sects.values():
+				sect.offset = max(sect.offset + shiftDelta, 0)
+				pass
 			pass
 
 		# update the data head to the next page aligned offset

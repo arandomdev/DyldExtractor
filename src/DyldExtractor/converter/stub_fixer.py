@@ -3,6 +3,7 @@ import enum
 import struct
 from typing import Iterator, List, Tuple, Dict
 
+from DyldExtractor.builder.linkedit_builder import LinkeditBuilder
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.file_context import FileContext
@@ -1644,26 +1645,18 @@ class _StubFixer(object):
 
 		self._statusBar.update()
 
-		# add the new data and update the load commands
-		linkeditFile.writeBytes(
-			self._symtab.symoff + (self._symtab.nsyms * nlist_64.SIZE),
-			newSymbols
+		# add new data and rebuild linkedit
+		builder = LinkeditBuilder(self._machoCtx)
+		builder.symtabData.symbols.extend(newSymbols)
+
+		nNewSymbols = int(len(newSymbols) / nlist_64.SIZE)
+		builder.dysymtabData.command.nundefsym += nNewSymbols
+
+		builder.build(
+			self._dyldCtx.convertAddr(
+				self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
+			)[0]
 		)
-		linkeditFile.writeBytes(
-			self._symtab.stroff + self._symtab.strsize,
-			newStrings
-		)
-
-		newSymbolsCount = int(len(newSymbols) / nlist_64.SIZE)
-		newStringSize = len(newStrings)
-
-		self._symtab.nsyms += newSymbolsCount
-		self._symtab.strsize += newStringSize
-		self._dysymtab.nundefsym += newSymbolsCount
-
-		linkedit = self._machoCtx.segments[b"__LINKEDIT"].seg
-		linkedit.vmsize += newStringSize
-		linkedit.filesize += newStringSize
 
 		self._statusBar.update()
 		pass
