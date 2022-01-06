@@ -69,7 +69,7 @@ class SymtabCommandData(LoadCommandData[symtab_command]):
 
 		self.updaters = [
 			self._symbolsUpdater,
-			self._stringsUpdater
+			self.stringsUpdater
 		]
 		self.dataFields = [
 			"symbols",
@@ -102,7 +102,7 @@ class SymtabCommandData(LoadCommandData[symtab_command]):
 		self.command.symoff = newOffset if self.command.nsyms else 0
 		return self.symbols
 
-	def _stringsUpdater(self, newOffset: int) -> bytes:
+	def stringsUpdater(self, newOffset: int) -> bytes:
 		self.command.strsize = len(self.strings)
 		self.command.stroff = newOffset if self.command.strsize else 0
 		return self.strings
@@ -117,7 +117,7 @@ class DysymtabCommandData(LoadCommandData[dysymtab_command]):
 		super().__init__(command, source)
 
 		self.updaters = [
-			self._indirectSymUpdater
+			self.indirectSymUpdater
 		]
 		self.dataFields = [
 			"indirectSyms"
@@ -135,7 +135,7 @@ class DysymtabCommandData(LoadCommandData[dysymtab_command]):
 			pass
 		pass
 
-	def _indirectSymUpdater(self, newOffset: int) -> bytes:
+	def indirectSymUpdater(self, newOffset: int) -> bytes:
 		self.command.nindirectsyms = int(len(self.indirectSyms) / 4)
 		self.command.indirectsymoff = newOffset if self.command.nindirectsyms else 0
 		return self.indirectSyms
@@ -302,6 +302,7 @@ class LinkeditBuilder(object):
 
 		self.symtabData = None
 		self.dysymtabData = None
+		self.dyldInfoData = None
 
 		self._processLoadCommands()
 		pass
@@ -335,7 +336,8 @@ class LinkeditBuilder(object):
 				lcCmd == LoadCommands.LC_DYLD_INFO
 				or lcCmd == LoadCommands.LC_DYLD_INFO_ONLY
 			):
-				self._loadCommands.append(DyldInfoCommandData(lc, self._linkeditCtx))
+				self.dyldInfoData = DyldInfoCommandData(lc, self._linkeditCtx)
+				self._loadCommands.append(self.dyldInfoData)
 				pass
 
 			elif lcCmd in (
@@ -385,12 +387,22 @@ class LinkeditBuilder(object):
 			fill = b"\x00" * (len(data) % 8)
 			return data + fill
 
+		# update the strings after the symbols and indirect symbols
+		updaters = []
 		for lc in self._loadCommands:
-			for updater in lc.updaters:
-				data = ptrAlign(updater(dataHead))
-				newLinkedit.extend(data)
-				dataHead += len(data)
-				pass
+			updaters.extend(lc.updaters)
+			pass
+
+		updaters.remove(self.symtabData.stringsUpdater)
+		updaters.insert(
+			updaters.index(self.dysymtabData.indirectSymUpdater) + 1,
+			self.symtabData.stringsUpdater
+		)
+
+		for updater in updaters:
+			data = ptrAlign(updater(dataHead))
+			newLinkedit.extend(data)
+			dataHead += len(data)
 			pass
 
 		self._linkeditCtx.writeBytes(newOffset, newLinkedit)

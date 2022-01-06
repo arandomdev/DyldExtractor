@@ -1,11 +1,16 @@
 import bisect
 from typing import Dict
 
+from DyldExtractor.builder.linkedit_builder import LinkeditBuilder
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor import leb128
 
 from DyldExtractor.macho.macho_structs import LoadCommands
 from DyldExtractor.macho.macho_constants import *
+
+
+class _GeneratorError(Exception):
+	pass
 
 
 class _RegularRebaseGenerator(object):
@@ -19,6 +24,7 @@ class _RegularRebaseGenerator(object):
 		super().__init__()
 
 		self._machoCtx = extractionCtx.machoCtx
+		self._dyldCtx = extractionCtx.dyldCtx
 		self._ptrs = extractionCtx.ptrTracker.ptrLocs
 		self._logger = extractionCtx.logger
 		self._statusBar = extractionCtx.statusBar
@@ -31,7 +37,14 @@ class _RegularRebaseGenerator(object):
 		self._generate()
 		self._finalizeInfo()
 
-		# TODO: add to linkedit
+		# Add rebase data to the linkedit
+		linkeditSeg = self._machoCtx.segments[b"__LINKEDIT"].seg
+		builder = LinkeditBuilder(self._machoCtx)
+		if builder.dyldInfoData is None:
+			raise _GeneratorError("Unable to find dyld info command")
+
+		builder.dyldInfoData.rebaseData = self._rebaseInfo
+		builder.build(self._dyldCtx.convertAddr(linkeditSeg.vmaddr)[0])
 		pass
 
 	def _sortPtrs(self) -> Dict[int, int]:
@@ -57,10 +70,6 @@ class _RegularRebaseGenerator(object):
 			ptrGroup = ptrs[lowBound:highBound]
 			sortedPtrs[segI] = ptrGroup
 			ptrsSorted += len(ptrGroup)
-			pass
-
-		if ptrsSorted != len(self._ptrs):
-			self._logger.error("Missed some pointers while sorting!")
 			pass
 
 		return sortedPtrs
@@ -94,10 +103,15 @@ class _RegularRebaseGenerator(object):
 def generateRebaseInfo(extractionCtx: ExtractionContext) -> None:
 	extractionCtx.statusBar.update(unit="Rebase Generator")
 
-	dyldInfo = extractionCtx.machoCtx.getLoadCommand(
-		(LoadCommands.LC_DYLD_INFO, LoadCommands.LC_DYLD_INFO_ONLY)
-	)
-	if dyldInfo:
-		_RegularRebaseGenerator(extractionCtx).run()
+	try:
+		dyldInfo = extractionCtx.machoCtx.getLoadCommand(
+			(LoadCommands.LC_DYLD_INFO, LoadCommands.LC_DYLD_INFO_ONLY)
+		)
+		if dyldInfo:
+			_RegularRebaseGenerator(extractionCtx).run()
+			pass
+		pass
+	except _GeneratorError as e:
+		extractionCtx.logger.error(f"Unable to generate rebase info, reason {e}")
 		pass
 	pass
