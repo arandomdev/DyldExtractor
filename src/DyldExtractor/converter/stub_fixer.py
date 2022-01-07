@@ -906,6 +906,7 @@ def _bindReader(
 		bindOff += 1
 
 		if opcode == BIND_OPCODE_DONE:
+			# TODO: Only for lazy bind info
 			# Only resets the record apparently
 			currentRecord = _BindRecord()
 			pass

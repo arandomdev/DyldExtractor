@@ -55,7 +55,6 @@ class _RegularRebaseGenerator(object):
 		"""
 
 		sortedPtrs = {}
-		ptrsSorted = 0
 
 		ptrs = sorted(self._ptrs)
 		for segI, seg in enumerate(self._machoCtx.segmentsI):
@@ -63,13 +62,14 @@ class _RegularRebaseGenerator(object):
 			lowBound = bisect.bisect_left(ptrs, seg.vmaddr)
 			highBound = bisect.bisect_right(
 				ptrs,
-				seg.vmaddr + seg.vmsize,
+				seg.vmaddr + seg.vmsize - 1,
 				lo=lowBound
 			)
 
 			ptrGroup = ptrs[lowBound:highBound]
-			sortedPtrs[segI] = ptrGroup
-			ptrsSorted += len(ptrGroup)
+			offGroup = [ptr - seg.vmaddr for ptr in ptrGroup]
+
+			sortedPtrs[segI] = offGroup
 			pass
 
 		return sortedPtrs

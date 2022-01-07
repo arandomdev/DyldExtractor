@@ -6,9 +6,6 @@ from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.file_context import FileContext
 
 
-_PAGE_SIZE = 0x4000
-
-
 @dataclass
 class WriteProcedure(object):
 	writeOffset: int
@@ -53,6 +50,7 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> List[WriteProcedure]:
 	# This includes the LinkEdit and MachO header
 	machoCtx = extractionCtx.machoCtx
 	dyldCtx = extractionCtx.dyldCtx
+	PAGE_SIZE = extractionCtx.PAGE_SIZE
 
 	# first change all the offset fields and record the writes
 	writeProcedures = []
@@ -94,7 +92,7 @@ def optimizeOffsets(extractionCtx: ExtractionContext) -> List[WriteProcedure]:
 
 		# update the data head to the next page aligned offset
 		dataHead += segment.seg.filesize
-		dataHead += _PAGE_SIZE - (dataHead % _PAGE_SIZE)
+		dataHead += PAGE_SIZE - (dataHead % PAGE_SIZE)
 		pass
 
 	return writeProcedures

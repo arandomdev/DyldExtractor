@@ -28,41 +28,62 @@ class LoadCommandData(Generic[_C]):
 	def __init__(self, command: _C, source: FileContext) -> None:
 		super().__init__()
 
+		self.dataFields: List[str] = []
+		"""List of data fields that need data loading."""
+
 		self.command = command
 		self.source = source
 
 		self.updaters: List[Callable[[int], bytes]] = []
 		"""Updater Function, (newOffset) -> dataSize"""
 
-		self.dataFields: List[str] = []
-		"""List of data fields that need data loading."""
-
 		self._loadingData = False
+		self._fieldStorage = {}
 		pass
 
 	def loadData(self) -> None:
 		...
 
-	def __getattribute__(self, name: str) -> Any:
-		# Don't load data if already loading
-		if super().__getattribute__("_loadingData"):
-			return super().__getattribute__(name)
-
+	def __getattr__(self, __name: str) -> Any:
 		# load data
-		if name in super().__getattribute__("dataFields"):
-			setattr(self, "_loadingData", True)
-			super().__getattribute__("loadData")()
-			setattr(self, "_loadingData", False)
-			pass
+		if __name in super().__getattribute__("dataFields"):
+			if not super().__getattribute__("_loadingData"):
+				super().__setattr__("_loadingData", True)
 
-		return super().__getattribute__(name)
+				# Fill undefined storage fields with none
+				storage = super().__getattribute__("_fieldStorage")
+				for name in super().__getattribute__("dataFields"):
+					if name not in storage:
+						storage[name] = None
+						pass
+					pass
+				super().__getattribute__("loadData")()
+
+				super().__setattr__("_loadingData", False)
+				pass
+
+			return super().__getattribute__("_fieldStorage")[__name]
+		else:
+			return super().__getattribute__(__name)
+
+	def __setattr__(self, __name: str, __value: Any) -> None:
+		if (
+			__name != "dataFields"
+			and __name in super().__getattribute__("dataFields")
+		):
+			super().__getattribute__("_fieldStorage")[__name] = __value
+			pass
+		else:
+			super().__setattr__(__name, __value)
+			pass
+		pass
 	pass
 
 
 class SymtabCommandData(LoadCommandData[symtab_command]):
 
-	symbols: bytearray = None
-	strings: bytearray = None
+	symbols: bytearray
+	strings: bytearray
 
 	def __init__(self, command: symtab_command, source: FileContext) -> None:
 		super().__init__(command, source)
@@ -111,7 +132,7 @@ class SymtabCommandData(LoadCommandData[symtab_command]):
 
 class DysymtabCommandData(LoadCommandData[dysymtab_command]):
 
-	indirectSyms: bytearray = None
+	indirectSyms: bytearray
 
 	def __init__(self, command: dysymtab_command, source: FileContext) -> None:
 		super().__init__(command, source)
@@ -144,7 +165,7 @@ class DysymtabCommandData(LoadCommandData[dysymtab_command]):
 
 class LinkeditDataCommandData(LoadCommandData[linkedit_data_command]):
 
-	data: bytearray = None
+	data: bytearray
 
 	def __init__(
 		self,
@@ -181,11 +202,11 @@ class LinkeditDataCommandData(LoadCommandData[linkedit_data_command]):
 
 class DyldInfoCommandData(LoadCommandData[dyld_info_command]):
 
-	rebaseData: bytearray = None
-	bindData: bytearray = None
-	weakBindData: bytearray = None
-	lazyBindData: bytearray = None
-	exportData: bytearray = None
+	rebaseData: bytearray
+	bindData: bytearray
+	weakBindData: bytearray
+	lazyBindData: bytearray
+	exportData: bytearray
 
 	def __init__(
 		self,

@@ -92,3 +92,25 @@ def decodeSleb128(buffer: bytes, readHead: int) -> Tuple[int, int]:
 			break
 
 	return (result, readHead)
+
+
+def decodeLength(buffer: bytes, readHead: int) -> int:
+	"""Get the length of the leb128 encoded data.
+
+	Args:
+		buffer: The data source.
+		readHead: The initial offset to read from.
+
+	Returns:
+		The length of the leb128 data.
+	"""
+
+	length = 0
+	while True:
+		length += 1
+
+		if buffer[readHead] & 0x80 == 0:
+			return length
+
+		readHead += 1
+		pass

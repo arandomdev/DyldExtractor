@@ -28,7 +28,8 @@ from DyldExtractor.converter import (
 	linkedit_optimizer,
 	stub_fixer,
 	objc_fixer,
-	rebase_generator
+	rebase_generator,
+	segment_fixer
 )
 
 
@@ -169,6 +170,8 @@ def _extractImage(
 		stub_fixer.fixStubs(extractionCtx)
 		objc_fixer.fixObjC(extractionCtx)
 
+		# TODO: make option to not do extra processing
+		segment_fixer.fixSegments(extractionCtx)
 		rebase_generator.generateRebaseInfo(extractionCtx)
 
 		writeProcedures = macho_offset.optimizeOffsets(extractionCtx)

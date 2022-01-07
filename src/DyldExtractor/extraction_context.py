@@ -27,6 +27,8 @@ class ExtractionContext(object):
 
 	ptrTracker: PointerTracker
 
+	PAGE_SIZE = 0x4000
+
 	def __init__(
 		self,
 		dyldCtx: DyldContext,
