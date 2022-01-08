@@ -408,17 +408,16 @@ class LinkeditBuilder(object):
 			fill = b"\x00" * (len(data) % 8)
 			return data + fill
 
-		# update the strings after the symbols and indirect symbols
+		# put the strings at the very end
 		updaters = []
 		for lc in self._loadCommands:
 			updaters.extend(lc.updaters)
 			pass
 
-		updaters.remove(self.symtabData.stringsUpdater)
-		updaters.insert(
-			updaters.index(self.dysymtabData.indirectSymUpdater) + 1,
-			self.symtabData.stringsUpdater
-		)
+		if self.symtabData:
+			updaters.remove(self.symtabData.stringsUpdater)
+			updaters.append(self.symtabData.stringsUpdater)
+			pass
 
 		for updater in updaters:
 			data = ptrAlign(updater(dataHead))
