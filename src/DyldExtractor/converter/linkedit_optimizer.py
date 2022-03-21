@@ -251,6 +251,10 @@ class _LinkeditOptimizer(object):
 		self.statusBar.update(status="Copy Local Symbols")
 
 		symbolsCache = self.dyldCtx.getSymbolsCache()
+		if symbolsCache.header.localSymbolsOffset == 0:
+			self.logger.error("Symbols Cache doesn't contain local symbols.")
+			return
+
 		localSymbolsInfo = dyld_cache_local_symbols_info(
 			symbolsCache.file,
 			symbolsCache.header.localSymbolsOffset

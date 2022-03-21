@@ -78,7 +78,7 @@ def _getArguments():
 
 
 def _openSubCaches(
-	mainCachePath: str,
+	mainCachePath: pathlib.Path,
 	numSubCaches: int
 ) -> Tuple[List[DyldContext], List[BinaryIO]]:
 	"""Create DyldContext objects for each sub cache.
@@ -92,10 +92,10 @@ def _openSubCaches(
 	Returns:
 		A list of subcaches, and their file objects, which must be closed!
 	"""
-	subCaches = []
-	subCachesFiles = []
+	subCaches: List[DyldContext] = []
+	subCachesFiles: List[BinaryIO] = []
 
-	subCacheSuffixes = [i for i in range(1, numSubCaches + 1)]
+	subCacheSuffixes = [str(i) for i in range(1, numSubCaches + 1)]
 	subCacheSuffixes.append("symbols")
 	for cacheSuffix in subCacheSuffixes:
 		subCachePath = f"{mainCachePath}.{cacheSuffix}"

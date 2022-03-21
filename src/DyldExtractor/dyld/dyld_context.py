@@ -97,12 +97,24 @@ class DyldContext(FileContext):
 
 	def hasSubCaches(self) -> bool:
 		"""Check if the dyld cache has sub caches.
+
+		Returns:
+			If the cache has subcaches or not. The symbols cache is factored
+			into this calculation, but the symbols cache is not counted in
+			numSubCaches. It is implicitly included.
 		"""
 
 		if self.headerContainsField("numSubCaches") and self.header.numSubCaches:
 			return True
-		else:
-			return False
+
+		emptyUUID = b"\x00" * len(self.header.symbolSubCacheUUID)
+		if (
+			self.headerContainsField("symbolSubCacheUUID")
+			and bytes(self.header.symbolSubCacheUUID) != emptyUUID
+		):
+			return True
+
+		return False
 
 	def addSubCaches(self, subCacheCtxs: List["DyldContext"]) -> None:
 		for ctx in subCacheCtxs:
