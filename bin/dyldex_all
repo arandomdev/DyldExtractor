@@ -254,6 +254,11 @@ def _main() -> None:
 	with open(args.dyld_path, "rb") as f:
 		dyldCtx = DyldContext(f)
 
+		# Check magic
+		if dyldCtx.header.magic[0:4] != b"dyld":
+			print("Cache's magic does not start with 'dyld', most likely given a file that's not a cache or the file is broken.")  # noqa
+			return
+
 		for image in dyldCtx.images:
 			imagePath = dyldCtx.readString(
 				image.pathFileOffset
