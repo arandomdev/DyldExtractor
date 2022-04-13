@@ -1142,9 +1142,16 @@ class _ObjCFixer(object):
 
 		methodListDef = self._slider.slideStruct(methodListAddr, objc_method_list_t)
 
-		methodListData = bytearray(methodListDef)
 		usesRelativeMethods = methodListDef.usesRelativeMethods()
 		entsize = methodListDef.getEntsize()
+
+		# Remove RELATIVE_METHODS_SELECTORS_ARE_DIRECT_FLAG Flag
+		if usesRelativeMethods:
+			methodListDef.entsizeAndFlags = (
+				methodListDef.entsizeAndFlags
+				& ~objc_method_list_t.RELATIVE_METHODS_SELECTORS_ARE_DIRECT_FLAG
+			)
+			pass
 
 		# check if size is correct
 		if usesRelativeMethods and entsize != objc_method_small_t.SIZE:
@@ -1153,6 +1160,8 @@ class _ObjCFixer(object):
 		elif not usesRelativeMethods and entsize != objc_method_large_t.SIZE:
 			self._logger.error(f"Large method list at {hex(methodListAddr)}, has an entsize that doesn't match the size of objc_method_large_t")  # noqa
 			return 0
+
+		methodListData = bytearray(methodListDef)
 
 		# fix relative pointers after we reserve a new address for the method list
 		# contains a list of tuples of field offsets and their target addresses
