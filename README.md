@@ -16,7 +16,7 @@ python3 -m pip install dyldextractor
 dyldex -l -f <Filter Text> [dyld_shared_cache_path]
 
 # Extracting a framework
-dyldex -e SpringBoard.framework\SpringBoard [dyld_shared_cache_path]
+dyldex -e SpringBoard.framework/SpringBoard [dyld_shared_cache_path]
 
 # Extracting all frameworks/libraries from a shared cache
 dyldex_all [dyld_shared_cache_path]
