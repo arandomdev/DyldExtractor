@@ -677,6 +677,69 @@ class _ObjCFixer(object):
 						)
 						pass
 					pass
+
+				elif sect.sectname == b"__objc_protorefs":
+					file = self._machoCtx.ctxForAddr(sect.addr)
+					for ptrAddr in range(sect.addr, sect.addr + sect.size, 8):
+						self._statusBar.update(status="Processing Protocols References")
+						protoRefAddr = self._slider.slideAddress(ptrAddr)
+
+						if protoRefAddr == 0:
+							# a null ref?
+							continue
+
+						newPtr = self._processProtocol(protoRefAddr)
+						file.writeBytes(
+							self._dyldCtx.convertAddr(ptrAddr)[0],
+							struct.pack("<Q", newPtr)
+						)
+					pass
+
+				if sect.sectname == b"__objc_classrefs":
+					file = self._machoCtx.ctxForAddr(sect.addr)
+					for ptrAddr in range(sect.addr, sect.addr + sect.size, 8):
+						self._statusBar.update(status="Processing Classes References")
+						classRefAddr = self._slider.slideAddress(ptrAddr)
+
+						if classRefAddr == 0:
+							# a null ref?
+							continue
+
+						newPtr, incomplete = self._processClass(classRefAddr)
+						if incomplete:
+							self._futureClasses.append((ptrAddr, classRefAddr))
+							pass
+						else:
+							file.writeBytes(
+								self._dyldCtx.convertAddr(ptrAddr)[0],
+								struct.pack("<Q", newPtr)
+							)
+							pass
+						pass
+					pass
+
+				if sect.sectname == b"__objc_superrefs":
+					file = self._machoCtx.ctxForAddr(sect.addr)
+					for ptrAddr in range(sect.addr, sect.addr + sect.size, 8):
+						self._statusBar.update(status="Processing Super References")
+						superRefAddr = self._slider.slideAddress(ptrAddr)
+
+						if superRefAddr == 0:
+							# a null ref?
+							continue
+
+						newPtr, incomplete = self._processClass(superRefAddr)
+						if incomplete:
+							self._futureClasses.append((ptrAddr, superRefAddr))
+							pass
+						else:
+							file.writeBytes(
+								self._dyldCtx.convertAddr(ptrAddr)[0],
+								struct.pack("<Q", newPtr)
+							)
+							pass
+						pass
+					pass
 				pass
 			pass
 		pass

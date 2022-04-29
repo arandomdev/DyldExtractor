@@ -227,10 +227,10 @@ if "__main__" == __name__:
 		# close the pool and cleanup
 		pool.close()
 		pool.join()
-		statusBar.update(jobsComplete)
-		pass
 
-	print("\n\n----- Summary -----")
-	print(summary)
-	print("-------------------\n\n")
+		print("\n----- Summary -----\n")
+		print(summary)
+		statusBar.update(jobsComplete)
+		statusBar.finish()
+		pass
 	pass
