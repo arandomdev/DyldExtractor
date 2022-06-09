@@ -34,13 +34,13 @@ class Structure(ctypes.LittleEndianStructure):
 		string = super().__str__()
 		for field in self._fields_:
 			fieldName = field[0]
-			fieldData = getattr(self, field[0])
+			fieldData = getattr(self, fieldName)
 
 			if isinstance(fieldData, ctypes.Array):
 				fieldData = list(fieldData)
 			elif isinstance(fieldData, int):
 				fieldData = hex(fieldData)
 
-			string += f"\n\t{field[0]}: {fieldData}"
+			string += f"\n\t{fieldName}: {fieldData}"
 
 		return string

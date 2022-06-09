@@ -77,38 +77,6 @@ def _getArguments():
 	return parser.parse_args(namespace=_DyldExtractorArgs)
 
 
-def _openSubCaches(
-	mainCachePath: pathlib.Path,
-	numSubCaches: int
-) -> Tuple[List[DyldContext], List[BinaryIO]]:
-	"""Create DyldContext objects for each sub cache.
-
-	Assumes that each sub cache has the same base name as the
-	main cache, and that the suffixes are preserved.
-
-	Also opens the symbols cache, and adds it to the end of
-	the list.
-
-	Returns:
-		A list of subcaches, and their file objects, which must be closed!
-	"""
-	subCaches: List[DyldContext] = []
-	subCachesFiles: List[BinaryIO] = []
-
-	subCacheSuffixes = [str(i) for i in range(1, numSubCaches + 1)]
-	subCacheSuffixes.append("symbols")
-	for cacheSuffix in subCacheSuffixes:
-		subCachePath = f"{mainCachePath}.{cacheSuffix}"
-		cacheFileObject = open(subCachePath, mode="rb")
-		cacheFileCtx = DyldContext(cacheFileObject)
-
-		subCaches.append(cacheFileCtx)
-		subCachesFiles.append(cacheFileObject)
-		pass
-
-	return subCaches, subCachesFiles
-
-
 def _extractImage(
 	dyldFilePath: pathlib.Path,
 	dyldCtx: DyldContext,
@@ -117,7 +85,7 @@ def _extractImage(
 ) -> None:
 	"""Extract an image and save it.
 
-	The order of converters is essentally a reverse of Apple's SharedCacheBuilder
+	The order of converters is essentially a reverse of Apple's SharedCacheBuilder
 	"""
 
 	logger = logging.getLogger()
@@ -132,13 +100,7 @@ def _extractImage(
 	subCacheFiles: List[BinaryIO] = []
 	try:
 		# add sub caches if there are any
-		if dyldCtx.hasSubCaches():
-			subCacheFileCtxs, subCacheFiles = _openSubCaches(
-				dyldFilePath,
-				dyldCtx.header.numSubCaches
-			)
-			dyldCtx.addSubCaches(subCacheFileCtxs)
-			pass
+		subCacheFiles = dyldCtx.addSubCaches(dyldFilePath)
 
 		# get a a writable copy of the MachOContext
 		machoOffset, context = dyldCtx.convertAddr(image.address)
@@ -212,7 +174,8 @@ def main():
 	elif args.verbosity == 3:
 		level = logging.DEBUG
 
-	progressbar.streams.wrap_stderr()  # needed for logging compatability
+	# needed for logging compatibility
+	progressbar.streams.wrap_stderr()  # type:ignore
 
 	logging.basicConfig(
 		format="{asctime}:{msecs:3.0f} [{levelname:^9}] {filename}:{lineno:d} : {message}",  # noqa
@@ -223,11 +186,6 @@ def main():
 
 	with open(args.dyld_path, "rb") as f:
 		dyldCtx = DyldContext(f)
-
-		# Check magic
-		if dyldCtx.header.magic[0:4] != b"dyld":
-			print("Cache's magic does not start with 'dyld', most likely given a file that's not a cache or the file is broken.")  # noqa
-			return
 
 		# enumerate images, create a map of paths and images
 		imageMap = {}

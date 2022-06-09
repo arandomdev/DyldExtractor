@@ -1177,6 +1177,9 @@ class _StubFixer(object):
 		)
 		if not dyldInfo:
 			return
+		elif not dyldInfo.lazy_bind_size:
+			self._logger.warning("Missing lazy bind info to fix helper sect.")
+			return
 
 		linkeditFile = self._machoCtx.ctxForAddr(
 			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr

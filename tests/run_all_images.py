@@ -43,7 +43,7 @@ def runForAllImages(
 	startIndex: int = 0,
 	stopIndex: int = -1
 ) -> None:
-	total = dyldCtx.header.imagesCount
+	total = dyldCtx.header.imagesCountOld
 
 	for index, imageData in enumerate(dyldCtx.images[startIndex:], startIndex):
 		if index == stopIndex:

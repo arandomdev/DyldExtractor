@@ -21,8 +21,8 @@ class dyld_cache_header(Structure):
 	magic: bytes 					# e.g. "dyld_v0    i386"
 	mappingOffset: int 				# file offset to first dyld_cache_mapping_info
 	mappingCount: int 				# number of dyld_cache_mapping_info entries
-	imagesOffset: int 				# file offset to first dyld_cache_image_info
-	imagesCount: int 				# number of dyld_cache_image_info entries
+	imagesOffsetOld: int 			# UNUSED: moved to imagesOffset to prevent older dsc_extractors from crashing
+	imagesCountOld: int 			# UNUSED: moved to imagesCount to prevent older dsc_extractors from crashing
 	dyldBaseAddress: int 			# base address of dyld when cache was built
 	codeSignatureOffset: int 		# file offset of code signature blob
 	codeSignatureSize: int 			# size of code signature blob (zero means to end of file)
@@ -66,33 +66,33 @@ class dyld_cache_header(Structure):
 	otherTrieSize: int 				# size of trie of dylibs and bundles with dlopen closures
 	mappingWithSlideOffset: int 	# file offset to first dyld_cache_mapping_and_slide_info
 	mappingWithSlideCount: int 		# number of dyld_cache_mapping_and_slide_info entries
-	dataMappingStartAddr: int
-	dylibsImageArrayWithSubCachesAddr: int
-	progClosuresWithSubCachesAddr: int
-	progClosuresWithSubCachesSize: int
-	progClosuresTrieWithSubCachesAddr: int
-	progClosuresTrieWithSubCachesSize: int
-	dyld4Info: int
-	unknown1: int
-	unknown2: int
-	unknownOffset1: int
-	unknownSize1: int
-	subCacheInfoOffset: int
-	numSubCaches: int
-	symbolSubCacheUUID: bytes
-	unknown3: int
-	unknown4: int
-	unknown5: int
-	unknown6: int
-	imagesOffsetWithSubCaches: int 	# file offset to first dyld_cache_image_info
-	imagesCountWithSubCaches: int 	# number of dyld_cache_image_info entries
+	dylibsPBLStateArrayAddrUnused: int  # unused
+	dylibsPBLSetAddr: int 			# (unslid) address of PrebuiltLoaderSet of all cached dylibs
+	programsPBLSetPoolAddr: int 	# (unslid) address of pool of PrebuiltLoaderSet for each program
+	programsPBLSetPoolSize: int 	# size of pool of PrebuiltLoaderSet for each program
+	programTrieAddr: int 			# (unslid) address of trie mapping program path to PrebuiltLoaderSet
+	programTrieSize: int
+	osVersion: int 					# OS Version of dylibs in this cache for the main platform
+	altPlatform: int 				# e.g. iOSMac on macOS
+	altOsVersion: int 				# e.g. 14.0 for iOSMac
+	swiftOptsOffset: int 			# file offset to Swift optimizations header
+	swiftOptsSize: int 				# size of Swift optimizations header
+	subCacheArrayOffset: int 		# file offset to first dyld_subcache_entry
+	subCacheArrayCount: int 		# number of subCache entries
+	symbolFileUUID: bytes 			# unique value for the shared cache file containing unmapped local symbols
+	rosettaReadOnlyAddr: int 		# (unslid) address of the start of where Rosetta can add read-only/executable data
+	rosettaReadOnlySize: int 		# maximum size of the Rosetta read-only/executable region
+	rosettaReadWriteAddr: int 		# (unslid) address of the start of where Rosetta can add read-write data
+	rosettaReadWriteSize: int 		# maximum size of the Rosetta read-write region
+	imagesOffset: int 				# file offset to first dyld_cache_image_info
+	imagesCount: int 				# number of dyld_cache_image_info entries
 
 	_fields_ = [
 		("magic", c_char * 16),
 		("mappingOffset", c_uint32),
 		("mappingCount", c_uint32),
-		("imagesOffset", c_uint32),
-		("imagesCount", c_uint32),
+		("imagesOffsetOld", c_uint32),
+		("imagesCountOld", c_uint32),
 		("dyldBaseAddress", c_uint64),
 		("codeSignatureOffset", c_uint64),
 		("codeSignatureSize", c_uint64),
@@ -136,26 +136,26 @@ class dyld_cache_header(Structure):
 		("otherTrieSize", c_uint64),
 		("mappingWithSlideOffset", c_uint32),
 		("mappingWithSlideCount", c_uint32),
-		("dataMappingStartAddr", c_uint64),
-		("dylibsImageArrayWithSubCachesAddr", c_uint64),
-		("progClosuresWithSubCachesAddr", c_uint64),
-		("progClosuresWithSubCachesSize", c_uint64),
-		("progClosuresTrieWithSubCachesAddr", c_uint64),
-		("progClosuresTrieWithSubCachesSize", c_uint32),
-		("dyld4Info", c_uint32),
-		("unknown1", c_uint32),
-		("unknown2", c_uint32),
-		("unknownOffset1", c_uint64),
-		("unknownSize1", c_uint64),
-		("subCacheInfoOffset", c_uint32),
-		("numSubCaches", c_uint32),
-		("symbolSubCacheUUID", c_uint8 * 16),
-		("unknown3", c_uint64),
-		("unknown4", c_uint64),
-		("unknown5", c_uint64),
-		("unknown6", c_uint64),
-		("imagesOffsetWithSubCaches", c_uint32),
-		("imagesCountWithSubCaches", c_uint32),
+		("dylibsPBLStateArrayAddrUnused", c_uint64),
+		("dylibsPBLSetAddr", c_uint64),
+		("programsPBLSetPoolAddr", c_uint64),
+		("programsPBLSetPoolSize", c_uint64),
+		("programTrieAddr", c_uint64),
+		("programTrieSize", c_uint32),
+		("osVersion", c_uint32),
+		("altPlatform", c_uint32),
+		("altOsVersion", c_uint32),
+		("swiftOptsOffset", c_uint64),
+		("swiftOptsSize", c_uint64),
+		("subCacheArrayOffset", c_uint32),
+		("subCacheArrayCount", c_uint32),
+		("symbolFileUUID", c_uint8 * 16),
+		("rosettaReadOnlyAddr", c_uint64),
+		("rosettaReadOnlySize", c_uint64),
+		("rosettaReadWriteAddr", c_uint64),
+		("rosettaReadWriteSize", c_uint64),
+		("imagesOffset", c_uint32),
+		("imagesCount", c_uint32),
 	]
 
 
@@ -363,20 +363,44 @@ class dyld_cache_local_symbols_entry(Structure):
 	]
 
 
-class dyld_cache_local_symbols_entry2(Structure):
+class dyld_cache_local_symbols_entry64(Structure):
 
 	SIZE = 16
 
 	dylibOffset: int 		# offset in cache file of start of dylib
-	unknown: int 			# Unknown field, currently 0
 	nlistStartIndex: int 	# start index of locals for this dylib
 	nlistCount: int 		# number of local symbols for this dylib
 
 	_fields_ = [
-		("dylibOffset", c_uint32),
-		("unknown", c_uint32),
+		("dylibOffset", c_uint64),
 		("nlistStartIndex", c_uint32),
 		("nlistCount", c_uint32),
+	]
+
+
+class dyld_subcache_entry(Structure):
+	SIZE = 24
+
+	uuid: bytes 		# The UUID of the subCache file
+	cacheVMOffset: int 	# The offset of this subcache from the main cache base address
+
+	_fields_ = [
+		("uuid", c_char * 16),
+		("cacheVMOffset", c_uint64),
+	]
+
+
+class dyld_subcache_entry2(Structure):
+	SIZE = 56
+
+	uuid: bytes 			# The UUID of the subCache file
+	cacheVMOffset: int 		# The offset of this subcache from the main cache base address
+	fileExtension: bytes 	# File extension of the subcache
+
+	_fields_ = [
+		("uuid", c_char * 16),
+		("cacheVMOffset", c_uint64),
+		("fileExtension", c_char * 32),
 	]
 
 
@@ -416,7 +440,7 @@ class dyld_cache_image_patches(Structure):
 
 class dyld_cache_patchable_export(Structure):
 
-	SIZE: 16
+	SIZE: int = 16
 
 	cacheOffsetOfImpl: int
 	patchLocationsStartIndex: int

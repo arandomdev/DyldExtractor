@@ -1,13 +1,13 @@
 import struct
-from typing import Union, Type, Dict
+from typing import Union, Dict, Optional
 
 from DyldExtractor.dyld.dyld_context import DyldContext
 from DyldExtractor.extraction_context import ExtractionContext
 
 from DyldExtractor.dyld.dyld_structs import (
+	dyld_cache_local_symbols_entry64,
 	dyld_cache_local_symbols_info,
 	dyld_cache_local_symbols_entry,
-	dyld_cache_local_symbols_entry2
 )
 
 from DyldExtractor.macho.macho_constants import *
@@ -214,38 +214,54 @@ class _LinkeditOptimizer(object):
 		self.newSymbolTableOffset = len(newLinkedit)
 		pass
 
-	def getLocalSymsEntryStruct(
+	def getLocalSymsEntry(
 		self,
 		symbolsCache: DyldContext,
 		symbolsInfo: dyld_cache_local_symbols_info
-	) -> Union[
-		Type[dyld_cache_local_symbols_entry],
-		Type[dyld_cache_local_symbols_entry2]
-	]:
-		"""Get the correct struct for the local symbol entries.
-
-		If the struct version could not be found,
-		return None.
+	) -> Optional[Union[
+		dyld_cache_local_symbols_entry,
+		dyld_cache_local_symbols_entry64
+	]]:
+		"""Get the local symbols entry for the MachOContext.
 		"""
 
-		# get the offset to the first image, and to the
-		# second image. Assumes that they are next to each other.
-		image1 = self.dyldCtx.convertAddr(self.dyldCtx.images[0].address)[0]
-		image1 = struct.pack("<I", image1)
-		image2 = self.dyldCtx.convertAddr(self.dyldCtx.images[1].address)[0]
-		image2 = struct.pack("<I", image2)
+		localSymEntryStart = (
+			symbolsCache.header.localSymbolsOffset
+			+ symbolsInfo.entriesOffset
+		)
+		if (self.dyldCtx.headerContainsField("symbolFileUUID")):
+			# Newer cache, vm offset to mach header
+			machoOffset = (
+				self.machoCtx.segments[b"__TEXT"].seg.vmaddr
+				- self.dyldCtx.header.sharedRegionStart
+			)
 
-		entriesOff = symbolsInfo._fileOff_ + symbolsInfo.entriesOffset
-		image1Off = symbolsCache.file.find(image1, entriesOff)
-		image2Off = symbolsCache.file.find(image2, entriesOff)
-
-		structSize = image2Off - image1Off
-		if structSize == dyld_cache_local_symbols_entry.SIZE:
-			return dyld_cache_local_symbols_entry
-		elif structSize == dyld_cache_local_symbols_entry2.SIZE:
-			return dyld_cache_local_symbols_entry2
+			for i in range(symbolsInfo.entriesCount):
+				entry = dyld_cache_local_symbols_entry64(
+					symbolsCache.file,
+					localSymEntryStart + (i * dyld_cache_local_symbols_entry64.SIZE)
+				)
+				if entry.dylibOffset == machoOffset:
+					return entry
+				pass
+			pass
 		else:
-			return None
+			# Older caches, file offset to mach header.
+			machoOffset = self.dyldCtx.convertAddr(
+				self.machoCtx.segments[b"__TEXT"].seg.vmaddr
+			)[0]
+
+			for i in range(symbolsInfo.entriesCount):
+				entry = dyld_cache_local_symbols_entry(
+					symbolsCache.file,
+					localSymEntryStart + (i * dyld_cache_local_symbols_entry.SIZE)
+				)
+				if entry.dylibOffset == machoOffset:
+					return entry
+				pass
+			pass
+
+		return None
 
 	def copyLocalSymbols(self, newLinkedit: bytearray) -> None:
 		self.statusBar.update(status="Copy Local Symbols")
@@ -260,28 +276,10 @@ class _LinkeditOptimizer(object):
 			symbolsCache.header.localSymbolsOffset
 		)
 
-		entryStruct = self.getLocalSymsEntryStruct(
+		localSymbolsEntriesInfo = self.getLocalSymsEntry(
 			symbolsCache,
 			localSymbolsInfo
 		)
-		if not entryStruct:
-			self.logger.error("Unable to get local symbol entries structure.")
-			return
-
-		dylibOffset = (
-			self.machoCtx.segments[b"__TEXT"].seg.vmaddr
-			- self.dyldCtx.header.sharedRegionStart
-		)
-
-		localSymbolsEntriesInfo = None
-		for i in range(localSymbolsInfo.entriesCount):
-			entryOff = (i * entryStruct.SIZE)
-			entryOff += localSymbolsInfo._fileOff_ + localSymbolsInfo.entriesOffset
-
-			entry = entryStruct(symbolsCache.file, entryOff)
-			if entry.dylibOffset == dylibOffset:
-				localSymbolsEntriesInfo = entry
-				break
 
 		if not localSymbolsEntriesInfo:
 			self.logger.warning("Unable to find local symbol entries.")
@@ -483,6 +481,7 @@ class _LinkeditOptimizer(object):
 			if (
 				symbolIndex == INDIRECT_SYMBOL_ABS
 				or symbolIndex == INDIRECT_SYMBOL_LOCAL
+				or symbolIndex == (INDIRECT_SYMBOL_ABS | INDIRECT_SYMBOL_LOCAL)
 				or symbolIndex == 0
 			):
 				# Do nothing to the entry

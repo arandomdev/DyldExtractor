@@ -340,6 +340,19 @@ class dylinker_command(Structure):
 	]
 
 
+class thread_command(Structure):
+	cmd: int 		# LC_THREAD or  LC_UNIXTHREAD
+	cmdsize: int 	# total size of this command
+	# uint32_t flavor		   flavor of thread state
+	# uint32_t count		   count of uint32_t's in thread state
+	# struct XXX_thread_state state   thread state for this flavor
+	# ...
+
+	_fields_ = [
+		("cmd", c_uint32),
+		("cmdsize", c_uint32),
+	]
+
 class routines_command_64(Structure):
 	# for 64-bit architectures
 
@@ -719,8 +732,8 @@ LoadCommandMap = {
 	# LoadCommands.LC_SEGMENT: None,
 	LoadCommands.LC_SYMTAB: symtab_command,
 	LoadCommands.LC_SYMSEG: symseg_command,
-	# LoadCommands.LC_THREAD: None,
-	# LoadCommands.LC_UNIXTHREAD: None,
+	LoadCommands.LC_THREAD: thread_command,
+	LoadCommands.LC_UNIXTHREAD: thread_command,
 	LoadCommands.LC_LOADFVMLIB: fvmlib_command,
 	LoadCommands.LC_IDFVMLIB: fvmlib_command,
 	LoadCommands.LC_IDENT: ident_command,

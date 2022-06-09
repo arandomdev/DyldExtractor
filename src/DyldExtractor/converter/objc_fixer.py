@@ -499,8 +499,10 @@ class _ObjCFixer(object):
 			# First the version number and then pointers
 			verOff, ctx = self._dyldCtx.convertAddr(objcScoffs.addr)
 			version = ctx.readFormat("<Q", verOff)[0]
-			if version != 2:
-				self._logger.warning(f"Unknown objc opt version: {version}")
+			if version != 2 and version != 3:
+				self._logger.warning(
+					f"Unknown objc opt version: {version}, but continuing on."
+				)
 				pass
 
 			self._optMethodNamesAddr = self._slider.slideAddress(objcScoffs.addr + 8)

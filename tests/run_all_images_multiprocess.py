@@ -37,38 +37,6 @@ class _DummyProgressBar(object):
 		pass
 
 
-def _openSubCaches(
-	mainCachePath: str,
-	numSubCaches: int
-) -> Tuple[List[DyldContext], List[BinaryIO]]:
-	"""Create DyldContext objects for each sub cache.
-
-	Assumes that each sub cache has the same base name as the
-	main cache, and that the suffixes are preserved.
-
-	Also opens the symbols cache, and adds it to the end of
-	the list.
-
-	Returns:
-		A list of subcaches, and their file objects, which must be closed!
-	"""
-	subCaches = []
-	subCachesFiles = []
-
-	subCacheSuffixes = [i for i in range(1, numSubCaches + 1)]
-	subCacheSuffixes.append("symbols")
-	for cacheSuffix in subCacheSuffixes:
-		subCachePath = f"{mainCachePath}.{cacheSuffix}"
-		cacheFileObject = open(subCachePath, mode="rb")
-		cacheFileCtx = DyldContext(cacheFileObject)
-
-		subCaches.append(cacheFileCtx)
-		subCachesFiles.append(cacheFileObject)
-		pass
-
-	return subCaches, subCachesFiles
-
-
 def _imageRunner(dyldPath: str, imageIndex: int) -> None:
 	level = logging.DEBUG
 	loggingStream = io.StringIO()
@@ -93,13 +61,7 @@ def _imageRunner(dyldPath: str, imageIndex: int) -> None:
 		subCacheFiles: List[BinaryIO] = []
 		try:
 			# add sub caches if there are any
-			if dyldCtx.hasSubCaches():
-				subCacheFileCtxs, subCacheFiles = _openSubCaches(
-					dyldPath,
-					dyldCtx.header.numSubCaches
-				)
-				dyldCtx.addSubCaches(subCacheFileCtxs)
-				pass
+			subCacheFiles = dyldCtx.addSubCaches(dyldPath)
 
 			machoOffset, context = dyldCtx.convertAddr(
 				dyldCtx.images[imageIndex].address
@@ -125,7 +87,6 @@ def _imageRunner(dyldPath: str, imageIndex: int) -> None:
 				logger
 			)
 
-			# TODO: implement a way to select convertors
 			slide_info.processSlideInfo(extractionCtx)
 			linkedit_optimizer.optimizeLinkedit(extractionCtx)
 			stub_fixer.fixStubs(extractionCtx)

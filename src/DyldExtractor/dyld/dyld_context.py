@@ -1,3 +1,4 @@
+import pathlib
 from typing import (
 	List,
 	Tuple,
@@ -9,6 +10,8 @@ from DyldExtractor.dyld.dyld_structs import (
 	dyld_cache_header,
 	dyld_cache_mapping_info,
 	dyld_cache_image_info,
+	dyld_subcache_entry,
+	dyld_subcache_entry2,
 )
 
 
@@ -28,6 +31,10 @@ class DyldContext(FileContext):
 
 		self.header = dyld_cache_header(self.file)
 
+		# Check magic
+		if self.header.magic[0:4] != b"dyld":
+			raise ValueError("Cache's magic does not start with 'dyld', most likely given a file that's not a cache or the file is broken.")  # noqa
+
 		self.mappings: List[Tuple[dyld_cache_mapping_info, DyldContext]] = []
 		for i in range(self.header.mappingCount):
 			offset = self.header.mappingOffset + (i * dyld_cache_mapping_info.SIZE)
@@ -36,13 +43,13 @@ class DyldContext(FileContext):
 
 		# get images
 		self.images: List[dyld_cache_image_info] = []
-		if self.headerContainsField("imagesCountWithSubCaches"):
-			imagesCount = self.header.imagesCountWithSubCaches
-			imagesOffset = self.header.imagesOffsetWithSubCaches
-			pass
-		else:
+		if self.headerContainsField("imagesCount"):
 			imagesCount = self.header.imagesCount
 			imagesOffset = self.header.imagesOffset
+			pass
+		else:
+			imagesCount = self.header.imagesCountOld
+			imagesOffset = self.header.imagesOffsetOld
 			pass
 
 		for i in range(imagesCount):
@@ -101,27 +108,73 @@ class DyldContext(FileContext):
 		Returns:
 			If the cache has subcaches or not. The symbols cache is factored
 			into this calculation, but the symbols cache is not counted in
-			numSubCaches. It is implicitly included.
+			subCacheArrayCount. It is implicitly included.
 		"""
 
-		if self.headerContainsField("numSubCaches") and self.header.numSubCaches:
+		if (
+			self.headerContainsField("subCacheArrayCount")
+			and self.header.subCacheArrayCount
+		):
 			return True
 
-		emptyUUID = b"\x00" * len(self.header.symbolSubCacheUUID)
+		emptyUUID = b"\x00" * len(self.header.symbolFileUUID)
 		if (
-			self.headerContainsField("symbolSubCacheUUID")
-			and bytes(self.header.symbolSubCacheUUID) != emptyUUID
+			self.headerContainsField("symbolFileUUID")
+			and bytes(self.header.symbolFileUUID) != emptyUUID
 		):
 			return True
 
 		return False
 
-	def addSubCaches(self, subCacheCtxs: List["DyldContext"]) -> None:
-		for ctx in subCacheCtxs:
-			self._subCaches.append(ctx)
-			self.mappings.extend(ctx.mappings)
+	def addSubCaches(self, mainCachePath: pathlib.Path) -> List[BinaryIO]:
+		"""Adds any subcaches.
+
+		Args:
+			mainCachePath: Path to the main cache path.
+		Returns: A list of file objects that need to be closed.
+		"""
+
+		if not self.hasSubCaches():
+			return []
+
+		subCacheFiles: List[BinaryIO] = []
+		subCacheEntriesStart = self.header.subCacheArrayOffset
+		usesV2 = self.header.cacheType == 2
+		for i in range(self.header.subCacheArrayCount):
+			if usesV2:
+				subCacheEntry = dyld_subcache_entry2(
+					self.file,
+					subCacheEntriesStart + (i * dyld_subcache_entry2.SIZE)
+				)
+				subCachePath = mainCachePath.with_suffix(
+					subCacheEntry.fileExtension.decode("utf-8")
+				)
+				pass
+			else:
+				subCacheEntry = dyld_subcache_entry(
+					self.file,
+					subCacheEntriesStart + (i * dyld_subcache_entry.SIZE)
+				)
+				# has 1-based index extension
+				subCachePath = mainCachePath.with_suffix(f".{i + 1}")
+				pass
+
+			subCacheFile = open(subCachePath, mode="rb")
+			subCacheFiles.append(subCacheFile)
+			subCacheCtx = DyldContext(subCacheFile)
+			self._subCaches.append(subCacheCtx)
+			self.mappings.extend(subCacheCtx.mappings)
 			pass
-		pass
+
+		# Add Symbols Cache
+		symbolsCachePath = mainCachePath.with_suffix(".symbols")
+		symbolsCacheFile = open(symbolsCachePath, mode="rb")
+		subCacheFiles.append(symbolsCacheFile)
+		symbolsCacheCtx = DyldContext(symbolsCacheFile)
+		self._subCaches.append(symbolsCacheCtx)
+		self.mappings.extend(symbolsCacheCtx.mappings)
+
+		return subCacheFiles
 
 	def getSymbolsCache(self) -> "DyldContext":
 		"""Get the .symbols cache.
@@ -135,7 +188,7 @@ class DyldContext(FileContext):
 			return self
 
 		for cache in self._subCaches:
-			if bytes(self.header.symbolSubCacheUUID) == bytes(cache.header.uuid):
+			if bytes(self.header.symbolFileUUID) == bytes(cache.header.uuid):
 				return cache
 			pass
 
