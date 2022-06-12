@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import errno
 import io
 import logging
 import multiprocessing
@@ -45,6 +46,7 @@ class _DyldExtractorArgs(argparse.Namespace):
 
 	dyld_path: pathlib.Path
 	output: pathlib.Path
+	jobs: int
 	verbosity: int
 	pass
 
@@ -60,6 +62,10 @@ def _createArgParser() -> argparse.ArgumentParser:
 		"-o", "--output",
 		type=pathlib.Path,
 		help="Specify the output path for the extracted frameworks. By default it extracts to './binaries/'."  # noqa
+	)
+	parser.add_argument(
+		"-j", "--jobs", type=int, default=multiprocessing.cpu_count(),
+		help="Number of jobs to run simultaneously."  # noqa
 	)
 	parser.add_argument(
 		"-v", "--verbosity",
@@ -168,6 +174,12 @@ def _extractImage(
 				pass
 			pass
 
+		except OSError as e:
+			if e.errno == errno.EMFILE:
+				logger.error("Too many files open, you may need to increase your FD limit.")  # noqa
+			else:
+				raise e
+
 		except Exception as e:
 			logger.exception(e)
 			pass
@@ -228,7 +240,7 @@ def _main() -> None:
 			pass
 		pass
 
-	with multiprocessing.Pool(initializer=_workerInitializer) as pool:
+	with multiprocessing.Pool(args.jobs, initializer=_workerInitializer) as pool:
 		# Create a job for each image
 		jobs: List[Tuple[str, multiprocessing.pool.AsyncResult]] = []
 		jobsComplete = 0
