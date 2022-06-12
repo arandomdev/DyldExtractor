@@ -6,7 +6,7 @@ import pathlib
 import logging
 import os
 import sys
-from typing import List, BinaryIO, Tuple
+from typing import List, BinaryIO
 
 try:
 	progressbar.streams
