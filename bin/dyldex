@@ -74,6 +74,10 @@ def _getArguments():
 		help="List addresses along with framework paths. Only applies when --list-frameworks is specified."
 	)
 	parser.add_argument(
+		"-b", "--basenames", action="store_true",
+		help="Print only the basenames of each framework. Only applies when --list-frameworks is specified."
+	)
+	parser.add_argument(
 		"-v", "--verbosity", type=int, choices=[0, 1, 2, 3], default=1,
 		help="Increase verbosity, Option 1 is the default. | 0 = None | 1 = Critical Error and Warnings | 2 = 1 + Info | 3 = 2 + debug |"  # noqa
 	)
@@ -213,9 +217,10 @@ def main():
 			sortedPaths = sorted(imagePaths, key=lambda path: imageMap[path].address)
 
 			print("Listing Images\n--------------")
-			for path in sortedPaths:
+			for fullpath in sortedPaths:
+				path = os.path.basename(fullpath) if args.basenames else fullpath
 				if args.addresses:
-					print(f"{hex(imageMap[path].address)} : {path}")
+					print(f"{hex(imageMap[fullpath].address)} : {path}")
 				else:
 					print(path)
 
