@@ -70,6 +70,14 @@ def _getArguments():
 		help="Filter out frameworks when listing them."
 	)
 	parser.add_argument(
+		"-a", "--addresses", action="store_true",
+		help="List addresses along with framework paths. Only applies when --list-frameworks is specified."
+	)
+	parser.add_argument(
+		"-b", "--basenames", action="store_true",
+		help="Print only the basenames of each framework. Only applies when --list-frameworks is specified."
+	)
+	parser.add_argument(
 		"-v", "--verbosity", type=int, choices=[0, 1, 2, 3], default=1,
 		help="Increase verbosity, Option 1 is the default. | 0 = None | 1 = Critical Error and Warnings | 2 = 1 + Info | 3 = 2 + debug |"  # noqa
 	)
@@ -203,11 +211,18 @@ def main():
 			# filter if needed
 			if args.filter:
 				filterTerm = args.filter.strip().lower()
-				imagePaths = _filterImages(imagePaths, filterTerm)
+				imagePaths = set(_filterImages(imagePaths, filterTerm))
+
+			# sort the paths so they're displayed in VM address order
+			sortedPaths = sorted(imagePaths, key=lambda path: imageMap[path].address)
 
 			print("Listing Images\n--------------")
-			for path in imagePaths:
-				print(path)
+			for fullpath in sortedPaths:
+				path = os.path.basename(fullpath) if args.basenames else fullpath
+				if args.addresses:
+					print(f"{hex(imageMap[fullpath].address)} : {path}")
+				else:
+					print(path)
 
 			return
 
