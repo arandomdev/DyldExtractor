@@ -76,6 +76,10 @@ def _getArguments():
 	parser.add_argument(
 		"-b", "--basenames", action="store_true",
 		help="Print only the basenames of each framework. Only applies when --list-frameworks is specified."
+		)
+	parser.add_argument(
+		"--lookup",
+		help="Find the library that an address lives in. Address should be specified as hex. E.g. dyldex --lookup 0x18008e9f8 dyld_shared_cache_arm64e."
 	)
 	parser.add_argument(
 		"-v", "--verbosity", type=int, choices=[0, 1, 2, 3], default=1,
@@ -203,6 +207,31 @@ def main():
 			path = path.decode("utf-8")
 
 			imageMap[path] = imageData
+
+		# Find the image that an address lives in
+		if args.lookup:
+			lookupAddr = int(args.lookup, 16)
+
+			imagePaths = imageMap.keys()
+
+			# sort the paths so they're in VM address order
+			sortedPaths = sorted(imagePaths, key=lambda path: imageMap[path].address)
+
+			previousImagePath = None
+			for path in sortedPaths:
+				imageAddr = imageMap[path].address
+				if lookupAddr < imageAddr:
+					if previousImagePath is None:
+						print("Error: address before first image!", file=sys.stderr)
+						sys.exit(1)
+					print(os.path.basename(previousImagePath) if args.basenames else previousImagePath)
+					return
+				else:
+					previousImagePath = path
+			# We got to the end of the list, must be the last image
+			path = sortedPaths[-1]
+			print(os.path.basename(path) if args.basenames else path)
+			return
 
 		# list images option
 		if args.list_frameworks:
