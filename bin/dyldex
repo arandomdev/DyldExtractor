@@ -79,7 +79,7 @@ def _getArguments():
 		)
 	parser.add_argument(
 		"--lookup",
-		help="Find the library that an address lives in. Address should be specified as hex. E.g. dyldex --lookup 0x18008e9f8 dyld_shared_cache_arm64e."
+		help="Find the library that an address lives in. E.g. dyldex --lookup 0x18008e9f8 dyld_shared_cache_arm64e."
 	)
 	parser.add_argument(
 		"-v", "--verbosity", type=int, choices=[0, 1, 2, 3], default=1,
@@ -210,7 +210,7 @@ def main():
 
 		# Find the image that an address lives in
 		if args.lookup:
-			lookupAddr = int(args.lookup, 16)
+			lookupAddr = int(args.lookup, 0)
 
 			imagePaths = imageMap.keys()
 
