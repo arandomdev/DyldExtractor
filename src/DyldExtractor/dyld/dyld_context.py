@@ -166,13 +166,18 @@ class DyldContext(FileContext):
 			self.mappings.extend(subCacheCtx.mappings)
 			pass
 
-		# Add Symbols Cache
-		symbolsCachePath = mainCachePath.with_suffix(".symbols")
-		symbolsCacheFile = open(symbolsCachePath, mode="rb")
-		subCacheFiles.append(symbolsCacheFile)
-		symbolsCacheCtx = DyldContext(symbolsCacheFile)
-		self._subCaches.append(symbolsCacheCtx)
-		self.mappings.extend(symbolsCacheCtx.mappings)
+		if (
+			self.headerContainsField("symbolFileUUID")
+			and bytes(self.header.symbolFileUUID) != (b"\x00" * 16)
+		):
+			# Add Symbols Cache
+			symbolsCachePath = mainCachePath.with_suffix(".symbols")
+			symbolsCacheFile = open(symbolsCachePath, mode="rb")
+			subCacheFiles.append(symbolsCacheFile)
+			symbolsCacheCtx = DyldContext(symbolsCacheFile)
+			self._subCaches.append(symbolsCacheCtx)
+			self.mappings.extend(symbolsCacheCtx.mappings)
+			pass
 
 		return subCacheFiles
 
@@ -184,7 +189,7 @@ class DyldContext(FileContext):
 		Or None if the .symbols cache cannot be found.
 		"""
 
-		if not self._subCaches:
+		if not self._subCaches or not self.headerContainsField("symbolFileUUID"):
 			return self
 
 		for cache in self._subCaches:
