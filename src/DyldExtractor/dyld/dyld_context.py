@@ -139,7 +139,7 @@ class DyldContext(FileContext):
 
 		subCacheFiles: List[BinaryIO] = []
 		subCacheEntriesStart = self.header.subCacheArrayOffset
-		usesV2 = self.header.cacheType == 2
+		usesV2 = self.headerContainsField("cacheSubType")
 		for i in range(self.header.subCacheArrayCount):
 			if usesV2:
 				subCacheEntry = dyld_subcache_entry2(

@@ -31,11 +31,11 @@ class dyld_cache_header(Structure):
 	localSymbolsOffset: int 		# file offset of where local symbols are stored
 	localSymbolsSize: int 			# size of local symbols information
 	uuid: bytes 					# unique value for each shared cache file
-	cacheType: int 					# 0 for development, 1 for production
+	cacheType: int 					# 0 for development, 1 for production, 2 for multi-cache
 	branchPoolsOffset: int 			# file offset to table of uint64_t pool addresses
 	branchPoolsCount: int 			# number of uint64_t entries
-	accelerateInfoAddr: int 		# (unslid) address of optimization info
-	accelerateInfoSize: int 		# size of optimization info
+	dyldInCacheMH: int 				# (unslid) address of mach_header of dyld in cache
+	dyldInCacheEntry: int 			# (unslid) address of entry point (_dyld_start) of dyld in cache
 	imagesTextOffset: int 			# file offset to first dyld_cache_image_text_info
 	imagesTextCount: int 			# number of dyld_cache_image_text_info entries
 	patchInfoAddr: int 				# (unslid) address of dyld_cache_patch_info
@@ -54,7 +54,7 @@ class dyld_cache_header(Structure):
 	builtFromChainedFixups: int 	# some dylib in cache was built using chained fixups, so patch tables must be used for overrides
 	padding: int 					# TBD
 	sharedRegionStart: int 			# base load address of cache if not slid
-	sharedRegionSize: int 			# overall size of region cache can be mapped into
+	sharedRegionSize: int 			# overall size required to map the cache and all subCaches, if any
 	maxSlide: int 					# runtime slide of cache can be between zero and this value
 	dylibsImageArrayAddr: int 		# (unslid) address of ImageArray for dylibs in this cache
 	dylibsImageArraySize: int 		# size of ImageArray for dylibs in this cache
@@ -68,14 +68,14 @@ class dyld_cache_header(Structure):
 	mappingWithSlideCount: int 		# number of dyld_cache_mapping_and_slide_info entries
 	dylibsPBLStateArrayAddrUnused: int  # unused
 	dylibsPBLSetAddr: int 			# (unslid) address of PrebuiltLoaderSet of all cached dylibs
-	programsPBLSetPoolAddr: int 	# (unslid) address of pool of PrebuiltLoaderSet for each program
+	programsPBLSetPoolAddr: int 	# (unslid) address of pool of PrebuiltLoaderSet for each program 
 	programsPBLSetPoolSize: int 	# size of pool of PrebuiltLoaderSet for each program
 	programTrieAddr: int 			# (unslid) address of trie mapping program path to PrebuiltLoaderSet
 	programTrieSize: int
 	osVersion: int 					# OS Version of dylibs in this cache for the main platform
 	altPlatform: int 				# e.g. iOSMac on macOS
 	altOsVersion: int 				# e.g. 14.0 for iOSMac
-	swiftOptsOffset: int 			# file offset to Swift optimizations header
+	swiftOptsOffset: int 			# VM offset from cache_header* to Swift optimizations header
 	swiftOptsSize: int 				# size of Swift optimizations header
 	subCacheArrayOffset: int 		# file offset to first dyld_subcache_entry
 	subCacheArrayCount: int 		# number of subCache entries
@@ -86,6 +86,13 @@ class dyld_cache_header(Structure):
 	rosettaReadWriteSize: int 		# maximum size of the Rosetta read-write region
 	imagesOffset: int 				# file offset to first dyld_cache_image_info
 	imagesCount: int 				# number of dyld_cache_image_info entries
+	cacheSubType: int 				# 0 for development, 1 for production, when cacheType is multi-cache(2)
+	objcOptsOffset: int 			# VM offset from cache_header* to ObjC optimizations header
+	objcOptsSize: int 				# size of ObjC optimizations header
+	cacheAtlasOffset: int 			# VM offset from cache_header* to embedded cache atlas for process introspection
+	cacheAtlasSize: int 			# size of embedded cache atlas
+	dynamicDataOffset: int 			# VM offset from cache_header* to the location of dyld_cache_dynamic_data_header
+	dynamicDataMaxSize: int 		# maximum size of space reserved from dynamic data
 
 	_fields_ = [
 		("magic", c_char * 16),
@@ -104,8 +111,8 @@ class dyld_cache_header(Structure):
 		("cacheType", c_uint64),
 		("branchPoolsOffset", c_uint32),
 		("branchPoolsCount", c_uint32),
-		("accelerateInfoAddr", c_uint64),
-		("accelerateInfoSize", c_uint64),
+		("dyldInCacheMH", c_uint64),
+		("dyldInCacheEntry", c_uint64),
 		("imagesTextOffset", c_uint64),
 		("imagesTextCount", c_uint64),
 		("patchInfoAddr", c_uint64),
@@ -156,6 +163,13 @@ class dyld_cache_header(Structure):
 		("rosettaReadWriteSize", c_uint64),
 		("imagesOffset", c_uint32),
 		("imagesCount", c_uint32),
+		("cacheSubType", c_uint32),
+		("objcOptsOffset", c_uint64),
+		("objcOptsSize", c_uint64),
+		("cacheAtlasOffset", c_uint64),
+		("cacheAtlasSize", c_uint64),
+		("dynamicDataOffset", c_uint64),
+		("dynamicDataMaxSize", c_uint64),
 	]
 
 
