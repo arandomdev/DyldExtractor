@@ -330,6 +330,14 @@ _T = TypeVar("_T", bound=Structure)
 
 class PointerSlider(object):
 
+	def __new__(cls, extractionCtx: ExtractionContext) -> object:
+		if extractionCtx.dyldCtx.isFileset():
+			slider = KCPointerSlider.__new__(KCPointerSlider)
+			slider.__init__(extractionCtx)
+			return slider
+
+		return super().__new__(cls, extractionCtx)
+
 	def __init__(self, extractionCtx: ExtractionContext) -> None:
 		"""Provides a way to slide individual pointers.
 		"""
@@ -413,6 +421,20 @@ class PointerSlider(object):
 			pass
 
 		return structData
+
+class KCPointerSlider(object):
+	def __init__(self, extractionCtx: ExtractionContext) -> None:
+		"""Provides a way to slide individual pointers in kernelcaches.
+		"""
+		self._dyldCtx = extractionCtx.dyldCtx
+		pass
+	
+	def slideAddress(self, address: int) -> int:
+		# TODO(muirey03): This doesn't yet deal with chained pointers
+		if not (offset := self._dyldCtx.convertAddr(address)):
+			return None
+		offset, context = offset
+		return context.readFormat("<Q", offset)[0]
 
 
 def processSlideInfo(extractionCtx: ExtractionContext) -> None:

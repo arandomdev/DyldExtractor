@@ -1,7 +1,7 @@
 import progressbar
 import logging
 
-from DyldExtractor.dyld.dyld_context import DyldContext
+from DyldExtractor.cache_context import CacheContext
 from DyldExtractor.macho.macho_context import MachOContext
 
 
@@ -9,7 +9,7 @@ class ExtractionContext(object):
 	"""Holds state information for extraction
 	"""
 
-	dyldCtx: DyldContext
+	dyldCtx: CacheContext
 	machoCtx: MachOContext
 
 	# The update method of the the progress bar has
@@ -33,7 +33,7 @@ class ExtractionContext(object):
 
 	def __init__(
 		self,
-		dyldCtx: DyldContext,
+		dyldCtx: CacheContext,
 		machoCtx: MachOContext,
 		statusBar: progressbar.ProgressBar,
 		logger: logging.Logger

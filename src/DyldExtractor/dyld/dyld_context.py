@@ -13,9 +13,10 @@ from DyldExtractor.dyld.dyld_structs import (
 	dyld_subcache_entry,
 	dyld_subcache_entry2,
 )
+from DyldExtractor.cache_context import CacheContext
 
 
-class DyldContext(FileContext):
+class DyldContext(CacheContext):
 
 	def __init__(self, fileObject: BinaryIO, copyMode: bool = False) -> None:
 		"""A wrapper around a dyld file.
@@ -59,24 +60,6 @@ class DyldContext(FileContext):
 
 		self._subCaches: List[DyldContext] = []
 		pass
-
-	def convertAddr(self, vmaddr: int) -> Tuple[int, "DyldContext"]:
-		"""Convert a vmaddr to its file offset
-
-		Returns:
-			The file offset and the DyldContext, but if not found, `None`.
-		"""
-
-		for mapping, ctx in self.mappings:
-			lowBound = mapping.address
-			highBound = mapping.address + mapping.size
-
-			if vmaddr >= lowBound and vmaddr < highBound:
-				mappingOff = vmaddr - lowBound
-				return mapping.fileOffset + mappingOff, ctx
-
-		# didn't find the address in any mappings...
-		return None
 
 	def headerContainsField(self, field: str) -> bool:
 		"""Check to see if the header contains the given field.
