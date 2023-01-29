@@ -27,6 +27,7 @@ from DyldExtractor.converter import (
 	macho_offset,
 	linkedit_optimizer,
 	stub_fixer,
+	chained_fixups,
 )
 
 
@@ -116,6 +117,7 @@ def _extractImage(
 
 	#slide_info.processSlideInfo(extractionCtx)
 	#linkedit_optimizer.optimizeLinkedit(extractionCtx)
+	chained_fixups.fixChainedPointers(extractionCtx)
 	stub_fixer.fixStubs(extractionCtx)
 
 	writeProcedures = macho_offset.optimizeOffsets(extractionCtx)

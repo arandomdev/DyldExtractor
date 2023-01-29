@@ -21,7 +21,8 @@ from DyldExtractor.converter import (
 	macho_offset,
 	objc_fixer,
 	slide_info,
-	stub_fixer
+	stub_fixer,
+	chained_fixups,
 )
 
 from DyldExtractor.kc.kc_context import KCContext
@@ -141,6 +142,7 @@ def _extractImage(
 
 			#slide_info.processSlideInfo(extractionCtx)
 			#linkedit_optimizer.optimizeLinkedit(extractionCtx)
+			chained_fixups.fixChainedPointers(extractionCtx)
 			stub_fixer.fixStubs(extractionCtx)
 
 			writeProcedures = macho_offset.optimizeOffsets(extractionCtx)
