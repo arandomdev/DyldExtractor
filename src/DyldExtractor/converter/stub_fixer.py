@@ -57,7 +57,7 @@ class _Symbolizer(object):
 			pass
 
 		self._enumerateExports()
-		self._enumerateSymbols()
+		self._enumerateSymbols(self._machoCtx)
 		pass
 
 	def symbolizeAddr(self, addr: int) -> List[bytes]:
@@ -96,11 +96,18 @@ class _Symbolizer(object):
 		reExports: List[dyld_trie.ExportInfo] = []
 
 		# get an initial list of dependencies
-		if dylibs := self._machoCtx.getLoadCommand(DEP_LCS, multiple=True):
-			for dylib in dylibs:
-				if depInfo := self._getDepInfo(dylib, self._machoCtx):
-					depsQueue.append(depInfo)
-			pass
+		# assume every image in a fileset is a dependency:
+		if self._dyldCtx.isFileset():
+			for image in self._dyldCtx.images:
+				machoOffset, context = self._dyldCtx.convertAddr(image.address)
+				context = MachOContext(context.fileObject, machoOffset)
+				self._enumerateSymbols(context)
+		else:
+			if dylibs := self._machoCtx.getLoadCommand(DEP_LCS, multiple=True):
+				for dylib in dylibs:
+					if depInfo := self._getDepInfo(dylib, self._machoCtx):
+						depsQueue.append(depInfo)
+				pass
 
 		while len(depsQueue):
 			self._statusBar.update()
@@ -248,19 +255,19 @@ class _Symbolizer(object):
 					self._symbolCache[functionAddr] = [bytes(export.name)]
 		pass
 
-	def _enumerateSymbols(self) -> None:
+	def _enumerateSymbols(self, machoCtx) -> None:
 		"""Cache potential symbols in the symbol table.
 		"""
 
-		symtab: symtab_command = self._machoCtx.getLoadCommand(
+		symtab: symtab_command = machoCtx.getLoadCommand(
 			(LoadCommands.LC_SYMTAB,)
 		)
 		if not symtab:
 			self._logger.warning("Unable to find LC_SYMTAB.")
 			return
 
-		linkeditFile = self._machoCtx.ctxForAddr(
-			self._machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
+		linkeditFile = machoCtx.ctxForAddr(
+			machoCtx.segments[b"__LINKEDIT"].seg.vmaddr
 		)
 
 		for i in range(symtab.nsyms):
@@ -275,7 +282,7 @@ class _Symbolizer(object):
 
 			if symbolAddr == 0:
 				continue
-			if not self._machoCtx.containsAddr(symbolAddr):
+			if not machoCtx.containsAddr(symbolAddr):
 				self._logger.warning(f"Invalid address: {symbolAddr}, for symbol entry: {symbol}.")  # noqa
 				continue
 
@@ -1266,6 +1273,39 @@ class _StubFixer(object):
 		for segment in self._machoCtx.segmentsI:
 			for sect in segment.sectsI:
 				if sect.flags & SECTION_TYPE == S_SYMBOL_STUBS:
+					if sect.size == 0 and self._dyldCtx.isFileset():
+						# fileset stubs section was nuked, rebuild it
+						# here I expand the __TEXT_EXEC section
+						# we can assume that we have enough space for this
+						# as the area after will belong to another binary
+						sect.offset = segment.seg.fileoff + segment.seg.filesize
+						sect.reserved2 = 16
+						sect.size = sect.reserved2 * len(symbolPtrs)
+						segment.seg.vmsize += sect.size
+						segment.seg.filesize += sect.size
+						self._machoCtx.writeBytes(sect._fileOff_, sect)
+						self._machoCtx.writeBytes(segment.seg._fileOff_, segment.seg)
+
+						for i, (key, targets) in enumerate(symbolPtrs.items()):
+							self._statusBar.update(status="Fixing Stubs")
+
+							stubAddr = sect.addr + (i * sect.reserved2)
+							symPtrAddr = targets[0]
+
+							symPtrOff = self._dyldCtx.convertAddr(symPtrAddr)[0]
+							if not symbolPtrFile:
+								symbolPtrFile = self._machoCtx.ctxForAddr(symPtrAddr)
+								pass
+							symbolPtrFile.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))
+
+							newStub = self._arm64Utils.generateAuthStubNormal(stubAddr, symPtrAddr)
+							stubOff, ctx = self._dyldCtx.convertAddr(stubAddr)
+							textFile.writeBytes(stubOff, newStub)
+
+							_addToMap(key, stubAddr)
+							pass
+						continue
+
 					for i in range(int(sect.size / sect.reserved2)):
 						self._statusBar.update(status="Fixing Stubs")
 
@@ -1400,13 +1440,12 @@ class _StubFixer(object):
 		return stubMap
 
 	def _fixCallsites(self, stubMap: Dict[bytes, Tuple[int]]) -> None:
-		if (
-			b"__TEXT" not in self._machoCtx.segments
-			or b"__text" not in self._machoCtx.segments[b"__TEXT"].sects
-		):
-			raise _StubFixerError("Unable to get __text section.")
+		textSect = self._machoCtx.segments.get(b"__TEXT", {}).sects.get(b"__text", None)
+		if not textSect:
+			textSect = self._machoCtx.segments.get(b"__TEXT_EXEC", {}).sects.get(b"__text", None)
 
-		textSect = self._machoCtx.segments[b"__TEXT"].sects[b"__text"]
+		if not textSect:
+			raise _StubFixerError("Unable to get __text section.")
 
 		textAddr = textSect.addr
 		# Section offsets by section_64.offset are sometimes

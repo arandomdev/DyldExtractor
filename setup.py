@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
 	name='dyldextractor',
-	version='2.1.3',
+	version='2.2.0',
 	description='Extract Binaries from Apple\'s Dyld Shared Cache',
 	long_description='file: README.md',
 	long_description_content_type='text/markdown',
