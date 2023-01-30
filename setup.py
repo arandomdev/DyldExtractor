@@ -19,5 +19,5 @@ setup(
 		'License :: OSI Approved :: MIT License',
 		'Operating System :: OS Independent'
 	],
-	scripts=['bin/dyldex', 'bin/dyldex_all']
+	scripts=['bin/dyldex', 'bin/dyldex_all', 'bin/kextex', 'bin/kextex_all']
 )
