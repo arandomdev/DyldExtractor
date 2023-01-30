@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
 	name='dyldextractor',
-	version='2.2.1',
+	version='2.2.2',
 	description='Extract Binaries from Apple\'s Dyld Shared Cache',
 	long_description='file: README.md',
 	long_description_content_type='text/markdown',
@@ -19,5 +19,5 @@ setup(
 		'License :: OSI Approved :: MIT License',
 		'Operating System :: OS Independent'
 	],
-	scripts=['bin/dyldex', 'bin/dyldex_all']
+	scripts=['bin/dyldex', 'bin/dyldex_all', 'bin/kextex', 'bin/kextex_all']
 )
