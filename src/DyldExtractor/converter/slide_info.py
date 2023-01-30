@@ -336,7 +336,7 @@ class PointerSlider(object):
 			slider.__init__(extractionCtx)
 			return slider
 
-		return super().__new__(cls, extractionCtx)
+		return super().__new__(cls)
 
 	def __init__(self, extractionCtx: ExtractionContext) -> None:
 		"""Provides a way to slide individual pointers.
