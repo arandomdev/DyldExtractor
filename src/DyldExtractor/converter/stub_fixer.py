@@ -317,6 +317,9 @@ class _StubFormat(enum.Enum):
 
 	# A special stub helper with a branch to a function.
 	Resolver = 6
+
+	# A branch in a branch pool
+	Branch = 7
 	pass
 
 
@@ -341,7 +344,8 @@ class Arm64Utilities(object):
 			(self._getAuthStubNormalTarget, _StubFormat.AuthStubNormal),
 			(self._getAuthStubOptimizedTarget, _StubFormat.AuthStubOptimized),
 			(self._getAuthStubResolverTarget, _StubFormat.AuthStubResolver),
-			(getResolverTarget, _StubFormat.Resolver)
+			(getResolverTarget, _StubFormat.Resolver),
+			(self._getBranchTarget, _StubFormat.Branch)
 		)
 
 		# A cache of resolved stub chains
@@ -867,6 +871,23 @@ class Arm64Utilities(object):
 		ldrTarget = adrpResult + imm
 		return self._slider.slideAddress(ldrTarget)
 	pass
+
+	def _getBranchTarget(self, address: int) -> int:
+		"""
+		Try to resolve a branch
+		"""
+
+		stubOff, ctx = self._dyldCtx.convertAddr(address) or (None, None)
+		if stubOff is None:
+			return None
+		
+		b = ctx.readFormat("<I", stubOff)[0]
+		if b & 0xFC000000 != 0x14000000:
+			return None
+		
+		offset = self.signExtend((b & 0x3FFFFFF) << 2, 28)
+		return address + offset
+
 
 
 @dataclasses.dataclass
