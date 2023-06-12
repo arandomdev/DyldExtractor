@@ -48,6 +48,7 @@ class _DyldExtractorArgs(argparse.Namespace):
 	output: pathlib.Path
 	jobs: int
 	verbosity: int
+	filter: str
 	pass
 
 
@@ -74,6 +75,11 @@ def _createArgParser() -> argparse.ArgumentParser:
 		type=int,
 		help="Increase verbosity, Option 1 is the default. | 0 = None | 1 = Critical Error and Warnings | 2 = 1 + Info | 3 = 2 + debug |"  # noqa
 	)
+    parser.add_argument(
+        "-f", "--filter",
+        type=str,
+        help="Extract libraries containing the filter in their name."
+    )
 
 	return parser
 
@@ -244,7 +250,10 @@ def _main() -> None:
 		# Create a job for each image
 		jobs: List[Tuple[str, multiprocessing.pool.AsyncResult]] = []
 		jobsComplete = 0
+        filter_enabled = args.filter is not None
 		for i, imagePath in enumerate(imagePaths):
+            if filter_enabled and args.filter not in imagePath:
+                continue
 			# The index should correspond with its index in the DSC
 			extractionArgs = (args.dyld_path, outputDir, i, imagePath, loggingLevel)
 			jobs.append((imagePath, pool.apply_async(_extractImage, extractionArgs)))
