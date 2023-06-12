@@ -21,6 +21,9 @@ dyldex -e SpringBoard.framework/SpringBoard [dyld_shared_cache_path]
 # Extracting all frameworks/libraries from a shared cache
 dyldex_all [dyld_shared_cache_path]
 
+# Extracting all frameworks/libraries from a shared cache containing name
+dyldex_all -f <Filter Text> [dyld_shared_cache_path]
+
 # In any of the above examples, replace "dyldex" and "dyldex_all" with "kextex" and "kextex_all" respectively to extract images from a MH_FILESET kernelcache instead of a DSC
 
 ```
