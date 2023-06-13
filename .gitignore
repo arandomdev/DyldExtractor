@@ -2,6 +2,7 @@ __pycache__
 .vscode/
 dist
 src/*.egg-info
+venv
 
 # Big files like the shared cache should be excluded from the repo
 binaries/
