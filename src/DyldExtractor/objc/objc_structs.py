@@ -285,3 +285,29 @@ class objc_category_t(Structure):
 		"protocols",
 		"instanceProperties",
 	]
+
+
+class relative_list_list_t(Structure):
+	SIZE = 8
+
+	entsize: int
+	count: int
+
+	_fields_ = [
+		("entsize", c_uint32),
+		("count", c_uint32),
+	]
+
+
+class relative_list_t(Structure):
+	SIZE = 8
+
+	offsetAndIndex: int
+
+	_fields_ = [("offsetAndIndex", c_uint64)]
+
+	def getOffset(self) -> int:
+		return c_int64(self.offsetAndIndex).value >> 0x10
+
+	def getImageIndex(self) -> int:
+		return self.offsetAndIndex & 0xFFFF

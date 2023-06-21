@@ -29,7 +29,9 @@ from DyldExtractor.objc.objc_structs import (
 	objc_property_list_t,
 	objc_property_t,
 	objc_protocol_list_t,
-	objc_protocol_t
+	objc_protocol_t,
+	relative_list_list_t,
+	relative_list_t
 )
 
 from DyldExtractor.macho.macho_structs import (
@@ -415,6 +417,15 @@ class _ObjCFixer(object):
 		else:
 			self._logger.error("Unable to find libobjc.A.dylib")
 			return
+		
+		# Get image index
+		imageAddr = self._machoCtx.segments[b"__TEXT"].seg.vmaddr
+		for i, image in enumerate(self._dyldCtx.images):
+			if image.address == imageAddr:
+				self._imageIndex = i
+				break
+			pass
+
 
 		self._checkMethodNameStorage()
 
@@ -918,17 +929,22 @@ class _ObjCFixer(object):
 			classDataDef.name = self._processString(classDataDef.name)
 			pass
 
-		if classDataDef.baseMethods:
+		baseMethodsAddr = classDataDef.baseMethods
+		if baseMethodsAddr & 0x1:
+			baseMethodsAddr = self._findInImageRelList(baseMethodsAddr & ~0x1)
+		if baseMethodsAddr:
 			classDataDef.baseMethods = self._processMethodList(
-				classDataDef.baseMethods,
+				baseMethodsAddr,
 				noImp=isStubClass
 			)
 			pass
+		
 
-		if classDataDef.baseProtocols:
-			classDataDef.baseProtocols = self._processProtocolList(
-				classDataDef.baseProtocols
-			)
+		baseProtocolsAddr = classDataDef.baseProtocols
+		if baseProtocolsAddr & 0x1:
+			baseProtocolsAddr = self._findInImageRelList(baseProtocolsAddr & ~0x1)
+		if baseProtocolsAddr:
+			classDataDef.baseProtocols = self._processProtocolList(baseProtocolsAddr)
 			pass
 
 		if classDataDef.ivars:
@@ -942,10 +958,11 @@ class _ObjCFixer(object):
 			)
 			pass
 
-		if classDataDef.baseProperties:
-			classDataDef.baseProperties = self._processPropertyList(
-				classDataDef.baseProperties
-			)
+		basePropertiesAddr = classDataDef.baseProperties
+		if basePropertiesAddr & 0x1:
+			basePropertiesAddr = self._findInImageRelList(basePropertiesAddr & ~0x1)
+		if basePropertiesAddr:
+			classDataDef.baseProperties = self._processPropertyList(basePropertiesAddr)
 			pass
 
 		# add or update data
@@ -1219,12 +1236,13 @@ class _ObjCFixer(object):
 			pass
 
 		# check if size is correct
-		if usesRelativeMethods and entsize != objc_method_small_t.SIZE:
-			self._logger.error(f"Small method list at {hex(methodListAddr)}, has an entsize that doesn't match the size of objc_method_small_t")  # noqa
-			return 0
-		elif not usesRelativeMethods and entsize != objc_method_large_t.SIZE:
-			self._logger.error(f"Large method list at {hex(methodListAddr)}, has an entsize that doesn't match the size of objc_method_large_t")  # noqa
-			return 0
+		if methodListDef.count != 0:
+			if usesRelativeMethods and entsize != objc_method_small_t.SIZE:
+				self._logger.error(f"Small method list at {hex(methodListAddr)}, has an entsize that doesn't match the size of objc_method_small_t")  # noqa
+				return 0
+			elif not usesRelativeMethods and entsize != objc_method_large_t.SIZE:
+				self._logger.error(f"Large method list at {hex(methodListAddr)}, has an entsize that doesn't match the size of objc_method_large_t")  # noqa
+				return 0
 
 		methodListData = bytearray(methodListDef)
 
@@ -1375,6 +1393,38 @@ class _ObjCFixer(object):
 
 		self._methodNameCache[stringAddr] = ptrAddr
 		return ptrAddr
+
+	def _findInImageRelList(self, relListListAddr: int) -> int:
+		"""Find the in image list in a relative list list.
+
+		Args:
+			relListListAddr: Address to the relative_list_list_t
+
+		returns:
+			The address to the in image list, or 0 if not found.
+		"""
+
+		relListList = self._slider.slideStruct(relListListAddr, relative_list_list_t)
+
+		# Check entsize
+		if relListList.entsize != relative_list_t.SIZE:
+			self._logger.error(f"relative_list_list_t at {hex(relListListAddr)} has an entsize that doesn't match relative_list_t")  # noqa
+			return 0
+		
+		for i in range(relListList.count):
+			relListAddr = (
+				relListListAddr
+				+ relative_list_list_t.SIZE
+				+ (i * relative_list_t.SIZE)
+			)
+			relList = self._slider.slideStruct(relListAddr, relative_list_t)
+			if (
+				relList.getImageIndex() == self._imageIndex
+				and (offset := relList.getOffset()) != 0
+			):
+				return relListAddr + offset
+			
+		return 0
 
 	def _finalizeFutureClasses(self) -> None:
 		extraSegStart = self._extraDataHead - len(self._extraData)
