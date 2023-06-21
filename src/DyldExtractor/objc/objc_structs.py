@@ -1,6 +1,7 @@
 from ctypes import (
 	c_int32,
 	c_uint32,
+	c_int64,
 	c_uint64
 )
 
