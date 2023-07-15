@@ -31,7 +31,11 @@ from DyldExtractor.objc.objc_structs import (
 	objc_protocol_list_t,
 	objc_protocol_t,
 	relative_list_list_t,
-	relative_list_t
+	relative_list_t,
+	objc_opt_t_V12,
+	objc_opt_t_V15a,
+	objc_headeropt_ro_t,
+	objc_header_info_ro_t_64
 )
 
 from DyldExtractor.macho.macho_structs import (
@@ -419,13 +423,10 @@ class _ObjCFixer(object):
 			return
 		
 		# Get image index
-		imageAddr = self._machoCtx.segments[b"__TEXT"].seg.vmaddr
-		for i, image in enumerate(self._dyldCtx.images):
-			if image.address == imageAddr:
-				self._imageIndex = i
-				break
-			pass
-
+		self._imageIndex = self._getImageIndex()
+		if self._imageIndex == -1:
+			self._logger.error("Unable to get objc image index")
+			return
 
 		self._checkMethodNameStorage()
 
@@ -929,22 +930,20 @@ class _ObjCFixer(object):
 			classDataDef.name = self._processString(classDataDef.name)
 			pass
 
-		baseMethodsAddr = classDataDef.baseMethods
-		if baseMethodsAddr & 0x1:
-			baseMethodsAddr = self._findInImageRelList(baseMethodsAddr & ~0x1)
-		if baseMethodsAddr:
+		if classDataDef.baseMethods & 0x1:
+			classDataDef.baseMethods = self._findInImageRelList(classDataDef.baseMethods & ~0x1)
+		if classDataDef.baseMethods:
 			classDataDef.baseMethods = self._processMethodList(
-				baseMethodsAddr,
+				classDataDef.baseMethods,
 				noImp=isStubClass
 			)
 			pass
 		
 
-		baseProtocolsAddr = classDataDef.baseProtocols
-		if baseProtocolsAddr & 0x1:
-			baseProtocolsAddr = self._findInImageRelList(baseProtocolsAddr & ~0x1)
-		if baseProtocolsAddr:
-			classDataDef.baseProtocols = self._processProtocolList(baseProtocolsAddr)
+		if classDataDef.baseProtocols & 0x1:
+			classDataDef.baseProtocols = self._findInImageRelList(classDataDef.baseProtocols & ~0x1)
+		if classDataDef.baseProtocols:
+			classDataDef.baseProtocols = self._processProtocolList(classDataDef.baseProtocols)
 			pass
 
 		if classDataDef.ivars:
@@ -958,11 +957,10 @@ class _ObjCFixer(object):
 			)
 			pass
 
-		basePropertiesAddr = classDataDef.baseProperties
-		if basePropertiesAddr & 0x1:
-			basePropertiesAddr = self._findInImageRelList(basePropertiesAddr & ~0x1)
-		if basePropertiesAddr:
-			classDataDef.baseProperties = self._processPropertyList(basePropertiesAddr)
+		if classDataDef.baseProperties & 0x1:
+			classDataDef.baseProperties = self._findInImageRelList(classDataDef.baseProperties & ~0x1)
+		if classDataDef.baseProperties:
+			classDataDef.baseProperties = self._processPropertyList(classDataDef.baseProperties)
 			pass
 
 		# add or update data
@@ -1425,6 +1423,56 @@ class _ObjCFixer(object):
 				return relListAddr + offset
 			
 		return 0
+	
+	def _getImageIndex(self) -> int:
+		"""Get the ObjC specific image index.
+		
+		Returns:
+			The image index or -1 if not found.
+		"""
+
+		# Read headeropt offset
+		objcOptAddr = None
+		for seg in self._libobjcImage.segments.values():
+			if b"__objc_opt_ro" in seg.sects:
+				objcOptAddr = seg.sects[b"__objc_opt_ro"].addr
+				break
+		if objcOptAddr is None:
+			self._logger.error("Unable to find __objc_opt_ro section")
+			return -1
+		
+		# Get header opt offset
+		objcOptOff, objcOptFile = self._dyldCtx.convertAddr(objcOptAddr)
+		objcOptVer = objcOptFile.readFormat("<I", objcOptOff)[0]
+
+		if objcOptVer in (12, 13):
+			headerOptOff = objc_opt_t_V12(objcOptFile.file, objcOptOff).headeropt_offset
+		elif objcOptVer in (15, 16):
+			headerOptOff = objc_opt_t_V15a(objcOptFile.file, objcOptOff).headeropt_ro_offset
+		else:
+			self._logger.error(f"Unknown objc_opt_t version: {objcOptVer}")
+			return -1
+		if headerOptOff == 0:
+			self._logger.error("libobjc does not have objc_headeropt_ro_t")
+			return -1
+		headerOptAddr = objcOptAddr + headerOptOff
+
+		# Find image index
+		imageAddr = self._machoCtx.segments[b"__TEXT"].seg.vmaddr
+		headerOptDataOff, headerOptFile = self._dyldCtx.convertAddr(headerOptAddr)
+		headerOpt = objc_headeropt_ro_t(headerOptFile.file, headerOptDataOff)
+		
+		for i in range(headerOpt.count):
+			infoOff = objc_headeropt_ro_t.SIZE + (i * headerOpt.entsize)
+			infoAddr = headerOptAddr + infoOff
+			infoDataOff = headerOptDataOff + infoOff
+			info = objc_header_info_ro_t_64(headerOptFile.file, infoDataOff)
+
+			if info.mhdr_offset + infoAddr == imageAddr:
+				return i
+			
+		return -1
+
 
 	def _finalizeFutureClasses(self) -> None:
 		extraSegStart = self._extraDataHead - len(self._extraData)

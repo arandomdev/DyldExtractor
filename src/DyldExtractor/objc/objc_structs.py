@@ -312,3 +312,131 @@ class relative_list_t(Structure):
 
 	def getImageIndex(self) -> int:
 		return self.offsetAndIndex & 0xFFFF
+
+
+class objc_opt_t_V12(Structure):
+
+	version: int
+	selopt_offset: int
+	headeropt_offset: int
+	clsopt_offset: int
+
+	_fields_ = [
+		("version", c_uint32),
+		("selopt_offset", c_int32),
+		("headeropt_offset", c_int32),
+		("clsopt_offset", c_int32),
+	]
+
+
+class objc_opt_t_V13(Structure):
+
+	version: int
+	selopt_offset: int
+	headeropt_offset: int
+	clsopt_offset: int
+	protocolopt_offset: int
+
+	_fields_ = [
+		("version", c_uint32),
+		("selopt_offset", c_int32),
+		("headeropt_offset", c_int32),
+		("clsopt_offset", c_int32),
+		("protocolopt_offset", c_int32),
+	]
+
+
+class objc_opt_t_V15a(Structure):
+
+	version: int
+	flags: int
+	selopt_offset: int
+	headeropt_ro_offset: int
+	clsopt_offset: int
+	protocolopt_offset: int
+	headeropt_rw_offset: int
+
+	_fields_ = [
+		("version", c_uint32),
+		("flags", c_uint32),
+		("selopt_offset", c_int32),
+		("headeropt_ro_offset", c_int32),
+		("clsopt_offset", c_int32),
+		("protocolopt_offset", c_int32),
+		("headeropt_rw_offset", c_int32),
+	]
+
+
+class objc_opt_t_V15b(Structure):
+
+	version: int
+	flags: int
+	selopt_offset: int
+	headeropt_ro_offset: int
+	clsopt_offset: int
+	unused_protocolopt_offset: int
+	headeropt_rw_offset: int
+	protocolopt_offset: int
+
+	_fields_ = [
+		("version", c_uint32),
+		("flags", c_uint32),
+		("selopt_offset", c_int32),
+		("headeropt_ro_offset", c_int32),
+		("clsopt_offset", c_int32),
+		("unused_protocolopt_offset", c_int32),
+		("headeropt_rw_offset", c_int32),
+		("protocolopt_offset", c_int32),
+	]
+
+
+class objc_opt_t_V16(Structure):
+
+	version: int 
+	flags: int 
+	selopt_offset: int 
+	headeropt_ro_offset: int 
+	unused_clsopt_offset: int 
+	unused_protocolopt_offset: int  # This is now 0 as we've moved to the new protocolopt_offset # noqa
+	headeropt_rw_offset: int 
+	unused_protocolopt2_offset: int 
+	largeSharedCachesClassOffset: int 
+	largeSharedCachesProtocolOffset: int 
+	relativeMethodSelectorBaseAddressOffset: int  # Relative method list selectors are offsets from this address # noqa
+
+	_fields_ = [
+		("version", c_uint32),
+		("flags", c_uint32),
+		("selopt_offset", c_int32),
+		("headeropt_ro_offset", c_int32),
+		("unused_clsopt_offset", c_int32),
+		("unused_protocolopt_offset", c_int32),
+		("headeropt_rw_offset", c_int32),
+		("unused_protocolopt2_offset", c_int32),
+		("largeSharedCachesClassOffset", c_int32),
+		("largeSharedCachesProtocolOffset", c_int32),
+		("relativeMethodSelectorBaseAddressOffset", c_int64),
+	]
+
+
+class objc_headeropt_ro_t(Structure):
+	SIZE = 8
+
+	count: int
+	entsize: int
+
+	_fields_ = [
+		("count", c_uint32),
+		("entsize", c_uint32),
+	]
+
+
+class objc_header_info_ro_t_64(Structure):
+
+	mhdr_offset: int
+	info_offset: int
+
+	_fields_ = [
+		("mhdr_offset", c_int64),
+		("info_offset", c_int64),
+	]
