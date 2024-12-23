@@ -2,13 +2,13 @@ from setuptools import setup, find_packages
 
 setup(
 	name='dyldextractor',
-	version='2.2.2',
+	version='2.3',
 	description='Extract Binaries from Apple\'s Dyld Shared Cache',
 	long_description='file: README.md',
 	long_description_content_type='text/markdown',
 	python_requires='>=3.8',
 	author='arandomdev',
-	url='https://github.com/arandomdev/dyldextractor',
+	url='https://github.com/donato-fiore/dyldextractor',
 	install_requires=['progressbar2', 'capstone==4.0.2'],
 	packages=find_packages(
 		where='src'

@@ -5,7 +5,7 @@ Extract Binaries from Apple's Dyld Shared Cache to be useful in a disassembler. 
 # Installation
 
 ```
-python3 -m pip install dyldextractor
+python3 setup.py install
 ```
 
 # Usage Examples
