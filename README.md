@@ -1,11 +1,11 @@
 [![PyPI version](https://badge.fury.io/py/dyldextractor.svg)](https://badge.fury.io/py/dyldextractor)
 # DyldExtractor
-Extract Binaries from Apple's Dyld Shared Cache to be useful in a disassembler. This tool only supports iOS, arm64.
+Extract Binaries from Apple's Dyld Shared Cache to be useful in a disassembler. This tool only supports iOS.
 
 # Installation
 
 ```
-pip3 install git+https://github.com/donato-fiore/DyldExtractor.git@iOS-18-Support
+python3 -m pip install dyldextractor
 ```
 
 # Usage Examples
