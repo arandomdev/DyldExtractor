@@ -4,15 +4,10 @@ This is mainly sourced from
 https://github.com/apple-oss-distributions/dyld/blob/4de7eaf4cce244fbfb9f3562d63200dbf8a6948d/include/mach-o/fixup-chains.h
 """
 
-import sys
 from ctypes import (
-	c_char,
-	c_uint8,
 	c_uint16,
 	c_uint32,
 	c_uint64,
-	Union,
-	sizeof
 )
 from enum import IntEnum
 

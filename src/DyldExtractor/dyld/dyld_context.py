@@ -5,7 +5,6 @@ from typing import (
 	BinaryIO
 )
 
-from DyldExtractor.file_context import FileContext
 from DyldExtractor.dyld.dyld_structs import (
 	dyld_cache_header,
 	dyld_cache_mapping_info,

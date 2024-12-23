@@ -1,29 +1,19 @@
-import pathlib
 from typing import (
 	List,
 	Tuple,
 	BinaryIO
 )
 
-from DyldExtractor.file_context import FileContext
 from DyldExtractor.dyld.dyld_structs import (
-	dyld_cache_header,
 	dyld_cache_mapping_info,
 	dyld_cache_image_info,
-	dyld_subcache_entry,
-	dyld_subcache_entry2,
 )
 
 from DyldExtractor.macho.macho_context import MachOContext
 from DyldExtractor.cache_context import CacheContext
 
 from DyldExtractor.macho.macho_structs import (
-	LoadCommandMap,
-	LoadCommands,
-	load_command,
-	UnknownLoadCommand,
-	mach_header_64,
-	segment_command_64
+	LoadCommands
 )
 
 class KCContext(CacheContext):

@@ -8,7 +8,6 @@ import sys
 from ctypes import (
 	c_char,
 	c_uint8,
-	c_uint16,
 	c_uint32,
 	c_uint64,
 	Union,
