@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 from typing import List, BinaryIO
+import resource
 
 try:
 	progressbar.streams
@@ -101,6 +102,8 @@ def _extractImage(
 	"""
 
 	logger = logging.getLogger()
+	
+	resource.setrlimit(resource.RLIMIT_NOFILE, (1024, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
 
 	statusBar = progressbar.ProgressBar(
 		prefix="{variables.unit} >> {variables.status} :: [",
