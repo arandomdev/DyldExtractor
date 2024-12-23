@@ -10,3 +10,5 @@ binaries/
 # Testing files
 dyldex
 test.sh
+build/
+.DS_Store
