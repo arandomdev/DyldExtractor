@@ -4,15 +4,10 @@ This is mainly sourced from
 https://github.com/apple-oss-distributions/dyld/blob/4de7eaf4cce244fbfb9f3562d63200dbf8a6948d/include/mach-o/fixup-chains.h
 """
 
-import sys
 from ctypes import (
-	c_char,
-	c_uint8,
 	c_uint16,
 	c_uint32,
 	c_uint64,
-	Union,
-	sizeof
 )
 from enum import IntEnum
 
@@ -37,6 +32,7 @@ class PointerFormat(IntEnum):
 	DYLD_CHAINED_PTR_ARM64E_FIRMWARE = 10
 	DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE = 11
 	DYLD_CHAINED_PTR_ARM64E_USERLAND24 = 12
+	DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE = 13
 
 class dyld_chained_fixups_header(Structure):
 	SIZE = 28

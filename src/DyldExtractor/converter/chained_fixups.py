@@ -1,20 +1,13 @@
 import struct
 from dataclasses import dataclass
-from typing import (
-	Type,
-	TypeVar,
-	Union,
-	Tuple,
-	List
-)
 
 from DyldExtractor.extraction_context import ExtractionContext
 from DyldExtractor.macho.macho_context import MachOContext
 
 from DyldExtractor.macho.macho_structs import (
 	LoadCommands,
-	linkedit_data_command,
 )
+
 from DyldExtractor.macho.fixup_chains_structs import (
 	dyld_chained_fixups_header,
 	dyld_chained_starts_in_image,

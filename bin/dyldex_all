@@ -9,6 +9,7 @@ import pathlib
 import signal
 import sys
 import progressbar
+import resource
 
 from typing import (
 	List,
@@ -115,6 +116,8 @@ def _extractImage(
 
 	# setup logging
 	logger = logging.getLogger(f"Worker: {outputPath}")
+
+	resource.setrlimit(resource.RLIMIT_NOFILE, (1024, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
 
 	loggingStream = io.StringIO()
 	handler = logging.StreamHandler(loggingStream)

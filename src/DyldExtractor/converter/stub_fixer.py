@@ -1448,6 +1448,17 @@ class _StubFixer(object):
 								self._logger.warning(f"Encountered a resolver at {hex(stubAddr)} while fixing stubs")  # noqa
 								continue
 
+							elif stubFormat == _StubFormat.AuthStubBRAA:
+								# only need to relink symbol pointer
+								symPtrOff = self._dyldCtx.convertAddr(symPtrAddr)[0]
+
+								if not symbolPtrFile:
+									symbolPtrFile = self._machoCtx.ctxForAddr(symPtrAddr)
+									pass
+
+								symbolPtrFile.writeBytes(symPtrOff, struct.pack("<Q", stubAddr))
+								continue
+
 							else:
 								self._logger.error(f"Unknown stub format: {stubFormat}, at {hex(stubAddr)}")  # noqa
 								continue

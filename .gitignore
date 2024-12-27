@@ -6,3 +6,7 @@ venv
 
 # Big files like the shared cache should be excluded from the repo
 binaries/
+
+# Testing files
+build/
+.DS_Store

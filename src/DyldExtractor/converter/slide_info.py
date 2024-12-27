@@ -19,7 +19,9 @@ from DyldExtractor.dyld.dyld_structs import (
 	dyld_cache_mapping_info,
 	dyld_cache_slide_info2,
 	dyld_cache_slide_info3,
-	dyld_cache_slide_pointer3
+	dyld_cache_slide_info5,
+	dyld_cache_slide_pointer3,
+	dyld_cache_slide_pointer5
 )
 
 from DyldExtractor.macho.macho_structs import (
@@ -29,14 +31,15 @@ from DyldExtractor.macho.macho_structs import (
 
 _SlideInfoMap = {
 	2: dyld_cache_slide_info2,
-	3: dyld_cache_slide_info3
+	3: dyld_cache_slide_info3,
+	5: dyld_cache_slide_info5,
 }
 
 
 @dataclass
 class _MappingInfo(object):
 	mapping: Union[dyld_cache_mapping_info, dyld_cache_mapping_and_slide_info]
-	slideInfo: Union[dyld_cache_slide_info2, dyld_cache_slide_info3]
+	slideInfo: Union[dyld_cache_slide_info2, dyld_cache_slide_info3, dyld_cache_slide_info5]
 	dyldCtx: DyldContext
 	"""The context that the mapping info belongs to."""
 	pass
@@ -261,6 +264,102 @@ class _V3Rebaser(object):
 		pass
 	pass
 
+class _V5Rebaser(object):
+
+	def __init__(
+		self,
+		extractionCtx: ExtractionContext,
+		mappingInfo: _MappingInfo
+	) -> None:
+		super().__init__()
+
+		self.statusBar = extractionCtx.statusBar
+		self.machoCtx = extractionCtx.machoCtx
+
+		self.dyldCtx = mappingInfo.dyldCtx
+		self.mapping = mappingInfo.mapping
+		self.slideInfo = mappingInfo.slideInfo
+
+	def run(self) -> None:
+		self.statusBar.update(unit="Slide Info Rebaser")
+
+		pageStartsOff = self.slideInfo._fileOff_ + len(self.slideInfo)
+		pageStarts = self.dyldCtx.getBytes(
+			pageStartsOff,
+			self.slideInfo.page_starts_count * 2
+		)
+		pageStarts = [page[0] for page in struct.iter_unpack("<H", pageStarts)]
+
+		for segment in self.machoCtx.segmentsI:
+			self._rebaseSegment(pageStarts, segment.seg)
+			pass
+		pass
+
+	def _rebaseSegment(
+		self,
+		pageStarts: Tuple[int],
+		segment: segment_command_64
+	) -> None:
+		# Check if the segment is included in the mapping
+		if not (
+			segment.vmaddr >= self.mapping.address
+			and segment.vmaddr < self.mapping.address + self.mapping.size
+		):
+			return
+
+		ctx = self.machoCtx.ctxForAddr(segment.vmaddr)
+
+		# Get the indices of relevant pageStarts
+		dataStart = self.mapping.address
+		pageSize = self.slideInfo.page_size
+
+		startAddr = segment.vmaddr - dataStart
+		startIndex = int(startAddr / pageSize)
+
+		endAddr = ((segment.vmaddr + segment.vmsize) - dataStart) + pageSize
+		endIndex = int(endAddr / pageSize)
+		endIndex = min(endIndex, len(pageStarts))
+
+		for i in range(startIndex, endIndex):
+			page = pageStarts[i]
+
+			if page == DYLD_CACHE_SLIDE_V5_PAGE_ATTR_NO_REBASE:
+				continue
+			else:
+				pageOff = (i * pageSize) + self.mapping.fileOffset
+				self._rebasePage(ctx, pageOff, page)
+
+				self.statusBar.update(status="Rebasing Pages")
+		pass
+
+	def _rebasePage(
+		self,
+		ctx: MachOContext,
+		pageOffset: int,
+		delta: int
+	) -> None:
+		locOff = pageOffset
+
+		while True:
+			locOff += delta
+			locInfo = dyld_cache_slide_pointer5(self.dyldCtx.file, locOff)
+
+			# It appears the delta encoded in the pointers are 64-bit jumps...
+			delta = locInfo.regular.next * 8
+
+			if locInfo.auth.auth:
+				newValue = self.slideInfo.value_add + locInfo.auth.runtimeOffset
+			else:
+				newValue = self.slideInfo.value_add + locInfo.regular.runtimeOffset
+
+			ctx.writeBytes(locOff, struct.pack("<Q", newValue))
+
+			if delta == 0:
+				break
+			pass
+		pass
+	pass
+
 
 def _getMappingInfo(
 	extractionCtx: ExtractionContext
@@ -385,7 +484,22 @@ class PointerSlider(object):
 						bottom43Bits = value51 & 0x000007FFFFFFFFFF
 						return (top8Bits << 13) | bottom43Bits
 
+				# arm64e pointer (iOS 18+, macOS 14.4+)
+				elif slideInfo.version == 5:
+					slideInfo = dyld_cache_slide_pointer5(context.file, offset)
+					
+					if slideInfo.auth.auth:
+						value = info.slideInfo.value_add + slideInfo.auth.runtimeOffset
+					else:
+						value = info.slideInfo.value_add + slideInfo.regular.runtimeOffset
+
+					if value == 0x180000000:
+						return 0x0
+					
+					return value
+
 				else:
+					print(f"Unknown slide version: {slideInfo.version}.")
 					return None
 
 		return None
@@ -467,5 +581,7 @@ def processSlideInfo(extractionCtx: ExtractionContext) -> None:
 			_V2Rebaser(extractionCtx, info).run()
 		elif info.slideInfo.version == 3:
 			_V3Rebaser(extractionCtx, info).run()
+		elif info.slideInfo.version == 5:
+			_V5Rebaser(extractionCtx, info).run()
 		else:
 			logger.error("Unknown slide version.")

@@ -1,18 +1,9 @@
-import pathlib
 from typing import (
-	List,
 	Tuple,
 	BinaryIO
 )
 
 from DyldExtractor.file_context import FileContext
-from DyldExtractor.dyld.dyld_structs import (
-	dyld_cache_header,
-	dyld_cache_mapping_info,
-	dyld_cache_image_info,
-	dyld_subcache_entry,
-	dyld_subcache_entry2,
-)
 
 
 class CacheContext(FileContext):

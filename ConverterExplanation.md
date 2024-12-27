@@ -36,12 +36,12 @@ Because the actual segments of the image are split across large distances, the r
 For people that want to contribute to this, here are some links for reference.
 
 ### Objective-C Runtime
-* https://opensource.apple.com/source/xnu/xnu-7195.81.3/EXTERNAL_HEADERS/mach-o/loader.h.auto.html
-* https://opensource.apple.com/source/objc4/objc4-781/runtime/objc-runtime-new.h.auto.html
+* https://fergofrog.com/code/codebrowser/xnu/EXTERNAL_HEADERS/mach-o/loader.h.html
+* https://github.com/opensource-apple/objc4/blob/master/runtime/objc-runtime-new.h
 
 ### DYLD Cache
-* https://opensource.apple.com/source/dyld/dyld-832.7.3/dyld3/shared-cache/dyld_cache_format.h.auto.html
-* https://opensource.apple.com/source/dyld/dyld-832.7.3/dyld3/shared-cache/dsc_extractor.cpp.auto.html
+* https://github.com/opensource-apple/dyld/blob/master/launch-cache/dyld_cache_format.h
+* https://github.com/opensource-apple/dyld/blob/master/launch-cache/dsc_extractor.cpp
 
 ### Other Extractors
 * https://github.com/deepinstinct/dsc_fix/blob/master/dsc_fix.py
