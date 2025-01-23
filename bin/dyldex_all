@@ -9,7 +9,13 @@ import pathlib
 import signal
 import sys
 import progressbar
-import resource
+
+try:
+    import resource
+    resource.setrlimit(resource.RLIMIT_NOFILE, (1024, resource.getrlimit(resource.RLIMIT_NOFILE)))
+except ImportError:
+    # resource module is not avilable on windows
+    pass
 
 from typing import (
 	List,
@@ -116,8 +122,6 @@ def _extractImage(
 
 	# setup logging
 	logger = logging.getLogger(f"Worker: {outputPath}")
-
-	resource.setrlimit(resource.RLIMIT_NOFILE, (1024, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
 
 	loggingStream = io.StringIO()
 	handler = logging.StreamHandler(loggingStream)
