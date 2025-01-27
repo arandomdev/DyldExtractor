@@ -9,11 +9,12 @@ import sys
 from typing import List, BinaryIO
 
 try:
-    import resource
-    resource.setrlimit(resource.RLIMIT_NOFILE, (1024, resource.getrlimit(resource.RLIMIT_NOFILE)))
+	import resource
+	soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+	resource.setrlimit(resource.RLIMIT_NOFILE, (1024, hard))
 except ImportError:
-    # resource module is not avilable on windows
-    pass
+	# resource module is not available on windows
+	pass
 
 try:
 	progressbar.streams
